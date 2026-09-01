@@ -1,0 +1,6 @@
+{
+  "name": "A'TIN Panay BlockScreening Exclusive Merchandise",
+  "description": "Exclusive Merchandise Portal & Fan Hub for A'TIN Panay x Team KAAL BlockScreening event with customer ordering, tracking, payment verification, and admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
