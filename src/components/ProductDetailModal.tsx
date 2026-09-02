@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Product, ProductSize } from '../types';
+import { Product, ProductSize, ProductGalleryItem } from '../types';
 import { useApp } from '../context/AppContext';
 import { 
   X, 
@@ -37,9 +37,26 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     viewSizeChartDefault ? 'size-chart' : 'overview'
   );
 
-  const images = product.galleryImages && product.galleryImages.length > 0 
-    ? product.galleryImages 
-    : [{ label: 'Product View', url: product.imageUrl }];
+  const rawImages = (Array.isArray(product.galleryImages) && product.galleryImages.length > 0)
+    ? product.galleryImages
+    : (product.imageUrl ? [{ label: 'Product View', url: product.imageUrl }] : []);
+
+  const images: ProductGalleryItem[] = rawImages
+    .filter(Boolean)
+    .map((img: any, i: number) => {
+      if (typeof img === 'string') {
+        return { label: `Photo #${i + 1}`, url: img };
+      }
+      return {
+        label: typeof img?.label === 'string' && img.label.trim() ? img.label : `Photo #${i + 1}`,
+        url: typeof img?.url === 'string' ? img.url : (product.imageUrl || '')
+      };
+    })
+    .filter(item => Boolean(item.url));
+
+  if (images.length === 0 && product.imageUrl) {
+    images.push({ label: 'Product View', url: product.imageUrl });
+  }
 
   const currentPrice = selectedSize === 'XXL' && product.xxlPrice 
     ? product.xxlPrice 

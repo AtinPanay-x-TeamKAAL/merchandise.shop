@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { 
   Upload, 
   Link as LinkIcon, 
@@ -16,9 +16,11 @@ import {
   AlertCircle,
   Maximize2,
   RefreshCw,
-  Tag
+  Tag,
+  Folder
 } from 'lucide-react';
 import { ProductGalleryItem, ProductCategory } from '../types';
+import { googleSheetsApi } from '../services/googleSheetsApi';
 
 interface ProductImageManagerProps {
   galleryImages: ProductGalleryItem[];
@@ -140,6 +142,23 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Normalize gallery images to guarantee valid array with proper string properties
+  const safeGalleryImages: ProductGalleryItem[] = useMemo(() => {
+    if (!Array.isArray(galleryImages)) return [];
+    return galleryImages
+      .filter(Boolean)
+      .map((img: any, i: number) => {
+        if (typeof img === 'string') {
+          return { label: `Photo #${i + 1}`, url: img };
+        }
+        return {
+          label: typeof img?.label === 'string' && img.label.trim() ? img.label : `Photo #${i + 1}`,
+          url: typeof img?.url === 'string' ? img.url : ''
+        };
+      })
+      .filter(item => Boolean(item.url));
+  }, [galleryImages]);
+
   // Determine active preset based on category
   const activePresetKey = category === 'Apparel' ? 'Apparel' : category === 'Drinkware' ? 'Drinkware' : 'Merchandise';
   const currentPreset = GALLERY_PRESETS[activePresetKey] || GALLERY_PRESETS.General;
@@ -149,7 +168,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
     setIsProcessing(true);
     setErrorMessage(null);
 
-    const newImages: ProductGalleryItem[] = [...galleryImages];
+    const newImages: ProductGalleryItem[] = [...safeGalleryImages];
     let defaultCover = coverImageUrl;
 
     try {
@@ -160,6 +179,12 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
         }
 
         const dataUrl = await optimizeImageFile(file);
+        let finalUrl = dataUrl;
+        try {
+          finalUrl = await googleSheetsApi.uploadImage(dataUrl, file.name, 'Merchandise');
+        } catch {
+          finalUrl = dataUrl;
+        }
         
         // Auto-assign smart label if preset labels exist
         let assignedLabel = labelInput;
@@ -172,7 +197,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
 
         newImages.push({
           label: assignedLabel,
-          url: dataUrl
+          url: finalUrl
         });
       }
 
@@ -199,7 +224,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
     }
 
     setErrorMessage(null);
-    const newImages = [...galleryImages, { label: labelInput.trim() || 'Product View', url: urlInput.trim() }];
+    const newImages = [...safeGalleryImages, { label: labelInput.trim() || 'Product View', url: urlInput.trim() }];
     const cover = coverImageUrl || urlInput.trim();
     onChange(newImages, cover);
     setUrlInput('');
@@ -231,9 +256,9 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
   // Reorder actions
   const moveImage = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= galleryImages.length) return;
+    if (targetIndex < 0 || targetIndex >= safeGalleryImages.length) return;
 
-    const updated = [...galleryImages];
+    const updated = [...safeGalleryImages];
     const [moved] = updated.splice(index, 1);
     updated.splice(targetIndex, 0, moved);
 
@@ -243,12 +268,12 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
   };
 
   const setAsCover = (url: string) => {
-    onChange(galleryImages, url);
+    onChange(safeGalleryImages, url);
   };
 
   const removeImage = (index: number) => {
-    const removedUrl = galleryImages[index]?.url;
-    const updated = galleryImages.filter((_, i) => i !== index);
+    const removedUrl = safeGalleryImages[index]?.url;
+    const updated = safeGalleryImages.filter((_, i) => i !== index);
     
     let newCover = coverImageUrl;
     if (coverImageUrl === removedUrl) {
@@ -259,7 +284,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
   };
 
   const updateImageLabel = (index: number, newLabel: string) => {
-    const updated = [...galleryImages];
+    const updated = [...safeGalleryImages];
     updated[index] = { ...updated[index], label: newLabel };
     onChange(updated, coverImageUrl);
   };
@@ -270,7 +295,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
     if (!targetPreset) return;
 
     // Update existing labels or prepare template slots
-    const updated = galleryImages.map((img, i) => ({
+    const updated = safeGalleryImages.map((img, i) => ({
       ...img,
       label: targetPreset.labels[i] || img.label
     }));
@@ -289,7 +314,11 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
               <span>Product Image Management & Gallery</span>
             </h4>
             <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-[#7c5cb7]/20 text-[#b19cd9] border border-[#7c5cb7]/30">
-              {galleryImages.length} {galleryImages.length === 1 ? 'image' : 'images'}
+              {safeGalleryImages.length} {safeGalleryImages.length === 1 ? 'image' : 'images'}
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+              <Folder className="w-3 h-3 text-emerald-400" />
+              <span>APMERCH_DATAFOLDER/Merchandise</span>
             </span>
           </div>
           <p className="text-[11px] text-slate-400 mt-0.5">
@@ -467,25 +496,26 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
       {/* Gallery Image List & Reordering Controls */}
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
-          <span>Active Product Gallery ({galleryImages.length})</span>
+          <span>Active Product Gallery ({safeGalleryImages.length})</span>
           <span className="text-[10px] text-[#f472b6] normal-case font-normal">
             ★ Star indicates primary cover image displayed in catalog
           </span>
         </div>
 
-        {galleryImages.length === 0 ? (
+        {safeGalleryImages.length === 0 ? (
           <div className="p-8 text-center rounded-2xl bg-[#0b0f19] border border-dashed border-[#232f4b] text-slate-500 text-xs">
             <ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
             No images uploaded yet. Upload or paste a URL above to display in the product showcase.
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {galleryImages.map((img, idx) => {
-              const isCover = (coverImageUrl && img.url === coverImageUrl) || (!coverImageUrl && idx === 0);
+            {safeGalleryImages.map((img, idx) => {
+              const imgUrl = img.url || '';
+              const isCover = (coverImageUrl && imgUrl === coverImageUrl) || (!coverImageUrl && idx === 0);
 
               return (
                 <div
-                  key={`${img.url.substring(0, 30)}-${idx}`}
+                  key={`slot-${idx}-${(imgUrl || '').slice(-25)}`}
                   className={`p-3 rounded-2xl border transition-all duration-200 flex gap-3 relative group ${
                     isCover
                       ? 'bg-gradient-to-r from-[#1e1b4b]/80 to-[#131b2e] border-[#7c5cb7] shadow-lg shadow-[#7c5cb7]/15'
@@ -499,8 +529,8 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
                     title="Click for full-resolution preview"
                   >
                     <img
-                      src={img.url}
-                      alt={img.label}
+                      src={imgUrl || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&auto=format&fit=crop&q=80'}
+                      alt={img.label || 'Product View'}
                       className="w-full h-full object-cover group-hover/thumb:scale-110 transition-transform duration-300"
                     />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
@@ -526,7 +556,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
                         {/* Quick Cover Toggle Button */}
                         <button
                           type="button"
-                          onClick={() => setAsCover(img.url)}
+                          onClick={() => setAsCover(imgUrl)}
                           className={`px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all ${
                             isCover
                               ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40'
@@ -542,7 +572,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
                       <div className="relative">
                         <input
                           type="text"
-                          value={img.label}
+                          value={img.label || ''}
                           onChange={(e) => updateImageLabel(idx, e.target.value)}
                           placeholder="Image Label (e.g. Front Mockup)"
                           className="w-full px-2.5 py-1.5 bg-[#131b2e] border border-[#232f4b] focus:border-[#7c5cb7] rounded-lg text-xs font-semibold text-white truncate"
@@ -582,7 +612,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
                         </button>
                         <button
                           type="button"
-                          disabled={idx === galleryImages.length - 1}
+                          disabled={idx === safeGalleryImages.length - 1}
                           onClick={() => moveImage(idx, 'down')}
                           className="p-1 rounded-md bg-[#131b2e] hover:bg-[#1e1b4b] disabled:opacity-30 disabled:hover:bg-[#131b2e] text-slate-300 hover:text-white border border-[#232f4b]"
                           title="Move later in gallery display"

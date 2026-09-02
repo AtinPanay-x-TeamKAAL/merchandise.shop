@@ -37,50 +37,71 @@ function doPost(e) {
 }
 
 function handleRequest(e) {
-  const lock = LockService.getScriptLock();
-  // Acquire lock for up to 30 seconds to guarantee atomic sequential ID generation and prevent duplicate IDs under high concurrent traffic
-  try {
-    lock.waitLock(30000);
-  } catch (err) {
-    return createJsonResponse({ 
-      success: false, 
-      error: 'Database lock acquisition timeout. Another transaction is currently writing to APMERCH_DATABASE. Please retry in a few moments.' 
-    });
+  let params = {};
+  if (e && e.postData && e.postData.contents) {
+    try {
+      params = JSON.parse(e.postData.contents);
+    } catch (ex) {
+      params = e.parameter || {};
+    }
+  } else if (e && e.parameter) {
+    params = e.parameter;
+  }
+
+  if (typeof params === 'string') {
+    try {
+      params = JSON.parse(params);
+    } catch (ex) {}
+  }
+
+  if (params && params.data) {
+    try {
+      const decoded = typeof params.data === 'string' ? JSON.parse(params.data) : params.data;
+      params = Object.assign({}, params, decoded);
+    } catch (ex) {}
+  }
+
+  if (params && params.customer && typeof params.customer === 'string') {
+    try {
+      params.customer = JSON.parse(params.customer);
+    } catch (ex) {}
+  }
+
+  const rawAction = params.action || (params.data && params.data.action) || 'ping';
+  const action = String(rawAction).trim();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Read-only actions do not mutate spreadsheet data and MUST NOT be blocked by mutation locks
+  const READ_ACTIONS = [
+    'ping',
+    'getInitialData',
+    'verifyCustomer',
+    'loginCustomer',
+    'getCustomerOrders',
+    'getLatestOrderIds',
+    'trackOrder',
+    'checkPendingOrder'
+  ];
+  const isReadAction = READ_ACTIONS.indexOf(action) !== -1;
+
+  let lock = null;
+  let hasLock = false;
+
+  if (!isReadAction) {
+    lock = LockService.getScriptLock();
+    try {
+      // Acquire lock for up to 10 seconds to guarantee atomic sequential ID generation
+      lock.waitLock(10000);
+      hasLock = true;
+    } catch (err) {
+      return createJsonResponse({ 
+        success: false, 
+        error: 'Database lock acquisition timeout. Another transaction is currently writing to APMERCH_DATABASE. Please retry in a few moments.' 
+      });
+    }
   }
 
   try {
-    let params = {};
-    if (e && e.postData && e.postData.contents) {
-      try {
-        params = JSON.parse(e.postData.contents);
-      } catch (ex) {
-        params = e.parameter || {};
-      }
-    } else if (e && e.parameter) {
-      params = e.parameter;
-    }
-
-    if (typeof params === 'string') {
-      try {
-        params = JSON.parse(params);
-      } catch (ex) {}
-    }
-
-    if (params && params.data) {
-      try {
-        const decoded = typeof params.data === 'string' ? JSON.parse(params.data) : params.data;
-        params = Object.assign({}, params, decoded);
-      } catch (ex) {}
-    }
-
-    if (params && params.customer && typeof params.customer === 'string') {
-      try {
-        params.customer = JSON.parse(params.customer);
-      } catch (ex) {}
-    }
-
-    const action = params.action || 'ping';
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
     ensureTabsExist(ss);
 
     let result = { success: true };
@@ -91,6 +112,7 @@ function handleRequest(e) {
           success: true, 
           message: 'APMERCH_DATABASE Google Apps Script Backend Online', 
           sheetTitle: ss.getName(),
+          capabilities: ['uploadImage', 'adminSaveProduct', 'createOrder', 'registerCustomer', 'emailLogs'],
           timestamp: new Date().toISOString() 
         };
         break;
@@ -165,6 +187,17 @@ function handleRequest(e) {
         result = adminSaveCollection(ss, params.collection);
         break;
 
+      case 'uploadImage':
+      case 'uploadImageToDrive':
+      case 'saveImage':
+      case 'uploadPhoto': {
+        const imgData = params.fileData || params.base64Data || params.imageData || params.image || (params.data && (params.data.fileData || params.data.base64Data));
+        const imgName = params.fileName || (params.data && params.data.fileName) || ('img_' + Utilities.getUuid().substring(0, 8));
+        const imgFolder = params.folder || (params.data && params.data.folder) || 'Merchandise';
+        result = uploadImageToDrive(imgData, imgName, imgFolder);
+        break;
+      }
+
       case 'adminUpdateSettings':
         result = adminUpdateSettings(ss, params.settings);
         break;
@@ -193,10 +226,14 @@ function handleRequest(e) {
   } catch (error) {
     return createJsonResponse({ success: false, error: error.toString(), stack: error.stack });
   } finally {
-    try {
-      SpreadsheetApp.flush();
-    } catch (flErr) {}
-    lock.releaseLock();
+    if (hasLock && lock) {
+      try {
+        SpreadsheetApp.flush();
+      } catch (flErr) {}
+      try {
+        lock.releaseLock();
+      } catch (relErr) {}
+    }
   }
 }
 
@@ -471,7 +508,17 @@ function readSettingsSheet(ss) {
   for (let i = 1; i < rows.length; i++) {
     const key = rows[i][0];
     const val = rows[i][1];
-    if (key) settings[key] = val;
+    if (key) {
+      if (typeof val === 'string' && (val.indexOf('[') === 0 || val.indexOf('{') === 0)) {
+        try {
+          settings[key] = JSON.parse(val);
+        } catch (e) {
+          settings[key] = val;
+        }
+      } else {
+        settings[key] = val;
+      }
+    }
   }
   return settings;
 }
@@ -824,15 +871,20 @@ function registerCustomer(ss, customerData) {
     lastLoginAt: now
   };
 
+  const customerEmail = String(customerData.email || (customerData.customer && customerData.customer.email) || '').trim();
+  const customerName = String(customerData.fullName || (customerData.customer && customerData.customer.fullName) || 'Valued Fan').trim();
+
   try {
-    sendTemplateEmail(
-      customerData.email,
-      customerData.fullName || 'Valued Fan',
-      "Account Verification Code: " + code + " - A'TIN Panay Merch Portal",
-      'Registration Verification',
-      '',
-      { code: code }
-    );
+    if (customerEmail) {
+      sendTemplateEmail(
+        customerEmail,
+        customerName,
+        "Account Verification Code: " + code + " - A'TIN Panay Merch Portal",
+        'Registration Verification',
+        '',
+        { code: code, email: customerEmail }
+      );
+    }
   } catch (e) {
     Logger.log('Verification mail error: ' + e);
   }
@@ -1049,6 +1101,108 @@ function adminUpdateOrderStatus(ss, orderNumber, status, paymentStatus, verified
 }
 
 /**
+ * ============================================================================
+ * Google Drive APMERCH_DATAFOLDER Storage Manager
+ * ============================================================================
+ * Handles image file uploads and base64 string storage into the designated
+ * Google Drive structure: APMERCH_DATAFOLDER with subfolders:
+ * - Payment_Qr
+ * - Logos
+ * - Merchandise
+ * - Collection
+ * - FanProjects
+ * - Homepage
+ * - TeamKAAL
+ */
+function getOrCreateFolder(parent, name) {
+  var folders = parent ? parent.getFoldersByName(name) : DriveApp.getFoldersByName(name);
+  if (folders.hasNext()) {
+    return folders.next();
+  }
+  return parent ? parent.createFolder(name) : DriveApp.createFolder(name);
+}
+
+function getAppMerchDataFolder(subfolderName) {
+  var root = getOrCreateFolder(null, 'APMERCH_DATAFOLDER');
+  if (subfolderName) {
+    return getOrCreateFolder(root, subfolderName);
+  }
+  return root;
+}
+
+function saveBase64ImageToDrive(base64Data, fileName, subfolderName) {
+  if (!base64Data || typeof base64Data !== 'string') return base64Data;
+  // If it's already an HTTP / HTTPS URL, leave as is
+  if (base64Data.indexOf('http://') === 0 || base64Data.indexOf('https://') === 0) {
+    return base64Data;
+  }
+  if (base64Data.indexOf('data:image') !== 0) {
+    return base64Data;
+  }
+
+  try {
+    var contentType = 'image/jpeg';
+    var cleanBase64 = base64Data;
+    var match = base64Data.match(/^data:([^;]+);base64,(.*)$/);
+    if (match) {
+      contentType = match[1];
+      cleanBase64 = match[2];
+    }
+
+    var ext = contentType.indexOf('png') > -1 ? '.png' : contentType.indexOf('webp') > -1 ? '.webp' : '.jpg';
+    var cleanName = (fileName || ('apmerch_' + Utilities.getUuid().substring(0, 8))).replace(/[^a-zA-Z0-9_-]/g, '_');
+    var safeFileName = cleanName.indexOf('.') > -1 ? cleanName : (cleanName + ext);
+
+    var decoded = Utilities.base64Decode(cleanBase64);
+    var blob = Utilities.newBlob(decoded, contentType, safeFileName);
+    var targetFolder = getAppMerchDataFolder(subfolderName || 'Merchandise');
+    var file = targetFolder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    var fileId = file.getId();
+    // High performance direct CDN URL for Google Drive images
+    var directUrl = 'https://lh3.googleusercontent.com/d/' + fileId;
+    return directUrl;
+  } catch (err) {
+    Logger.log('saveBase64ImageToDrive error in ' + subfolderName + ': ' + err);
+    // If Drive save fails, return safe fallback so sheet write does not throw 50,000 char error
+    return base64Data.length > 500 ? '' : base64Data;
+  }
+}
+
+function uploadImageToDrive(fileData, fileName, folder) {
+  if (!fileData) {
+    return { success: false, error: 'No image fileData provided.' };
+  }
+  try {
+    var url = saveBase64ImageToDrive(fileData, fileName, folder || 'Merchandise');
+    if (url && (url.indexOf('http://') === 0 || url.indexOf('https://') === 0)) {
+      return {
+        success: true,
+        url: url,
+        folder: folder || 'Merchandise',
+        fileName: fileName
+      };
+    }
+    return {
+      success: true,
+      url: fileData,
+      fallback: true,
+      folder: folder || 'Merchandise',
+      fileName: fileName
+    };
+  } catch (err) {
+    Logger.log('uploadImageToDrive error: ' + err);
+    return {
+      success: true,
+      url: fileData,
+      fallback: true,
+      error: String(err)
+    };
+  }
+}
+
+/**
  * Admin Save Product to Products sheet
  */
 function adminSaveProduct(ss, product) {
@@ -1061,6 +1215,20 @@ function adminSaveProduct(ss, product) {
     if (rows[i][0] === prodId) {
       foundRow = i + 1;
       break;
+    }
+  }
+
+  // Handle Cover Photo & Gallery in Drive APMERCH_DATAFOLDER/Merchandise
+  if (product.imageUrl && product.imageUrl.indexOf('data:image') === 0) {
+    product.imageUrl = saveBase64ImageToDrive(product.imageUrl, (product.slug || 'merch') + '-cover', 'Merchandise');
+  }
+
+  if (Array.isArray(product.galleryImages)) {
+    for (var g = 0; g < product.galleryImages.length; g++) {
+      var gItem = product.galleryImages[g];
+      if (gItem && gItem.url && gItem.url.indexOf('data:image') === 0) {
+        gItem.url = saveBase64ImageToDrive(gItem.url, (product.slug || 'merch') + '-gallery-' + g, 'Merchandise');
+      }
     }
   }
 
@@ -1129,6 +1297,19 @@ function adminSaveCollection(ss, col) {
     }
   }
 
+  // Handle Cover Photo in Drive APMERCH_DATAFOLDER/Collection
+  if (col.coverImage && col.coverImage.indexOf('data:image') === 0) {
+    col.coverImage = saveBase64ImageToDrive(col.coverImage, (col.title || 'collection') + '-cover', 'Collection');
+  }
+
+  if (Array.isArray(col.images)) {
+    for (var c = 0; c < col.images.length; c++) {
+      if (col.images[c] && col.images[c].indexOf('data:image') === 0) {
+        col.images[c] = saveBase64ImageToDrive(col.images[c], (col.title || 'collection') + '-img-' + c, 'Collection');
+      }
+    }
+  }
+
   const rowData = [
     id,
     col.title,
@@ -1166,6 +1347,11 @@ function adminSaveFanProject(ss, fp) {
       foundRow = i + 1;
       break;
     }
+  }
+
+  // Handle Banner Photo in Drive APMERCH_DATAFOLDER/FanProjects
+  if (fp.bannerImage && fp.bannerImage.indexOf('data:image') === 0) {
+    fp.bannerImage = saveBase64ImageToDrive(fp.bannerImage, (fp.title || 'fanproject') + '-banner', 'FanProjects');
   }
 
   const rowData = [
@@ -1209,6 +1395,11 @@ function adminSaveLibraryItem(ss, item) {
     }
   }
 
+  // Handle Cover Photo in Drive APMERCH_DATAFOLDER/TeamKAAL
+  if (item.coverImage && item.coverImage.indexOf('data:image') === 0) {
+    item.coverImage = saveBase64ImageToDrive(item.coverImage, (item.title || 'library') + '-cover', 'TeamKAAL');
+  }
+
   const rowData = [
     id,
     item.title,
@@ -1243,8 +1434,34 @@ function adminUpdateSettings(ss, settingsObj) {
   const sheet = ss.getSheetByName('Settings');
   const now = new Date().toISOString();
 
+  // Save QR and Branding photos in Drive APMERCH_DATAFOLDER subfolders
+  if (settingsObj.gcashQrUrl && settingsObj.gcashQrUrl.indexOf('data:image') === 0) {
+    settingsObj.gcashQrUrl = saveBase64ImageToDrive(settingsObj.gcashQrUrl, 'gcash-qr', 'Payment_Qr');
+  }
+  if (settingsObj.maribankQrUrl && settingsObj.maribankQrUrl.indexOf('data:image') === 0) {
+    settingsObj.maribankQrUrl = saveBase64ImageToDrive(settingsObj.maribankQrUrl, 'maribank-qr', 'Payment_Qr');
+  }
+  if (Array.isArray(settingsObj.paymentMethods)) {
+    for (var p = 0; p < settingsObj.paymentMethods.length; p++) {
+      var pm = settingsObj.paymentMethods[p];
+      if (pm && pm.qrCodeUrl && pm.qrCodeUrl.indexOf('data:image') === 0) {
+        pm.qrCodeUrl = saveBase64ImageToDrive(pm.qrCodeUrl, (pm.name || 'pm') + '-qr', 'Payment_Qr');
+      }
+    }
+  }
+  if (settingsObj.logoUrl && settingsObj.logoUrl.indexOf('data:image') === 0) {
+    settingsObj.logoUrl = saveBase64ImageToDrive(settingsObj.logoUrl, 'atin-panay-logo', 'Logos');
+  }
+  if (settingsObj.teamKaalLogoUrl && settingsObj.teamKaalLogoUrl.indexOf('data:image') === 0) {
+    settingsObj.teamKaalLogoUrl = saveBase64ImageToDrive(settingsObj.teamKaalLogoUrl, 'team-kaal-logo', 'Logos');
+  }
+  if (settingsObj.homepageHeroImageUrl && settingsObj.homepageHeroImageUrl.indexOf('data:image') === 0) {
+    settingsObj.homepageHeroImageUrl = saveBase64ImageToDrive(settingsObj.homepageHeroImageUrl, 'homepage-hero', 'Homepage');
+  }
+
   for (const key in settingsObj) {
-    const val = String(settingsObj[key]);
+    const rawVal = settingsObj[key];
+    const val = typeof rawVal === 'object' ? JSON.stringify(rawVal) : String(rawVal);
     const rows = sheet.getDataRange().getValues();
     let found = false;
     for (let i = 1; i < rows.length; i++) {
@@ -1297,19 +1514,29 @@ function adminSendEmail(ss, toEmail, recipientName, subject, templateType, order
  */
 function sendTemplateEmail(toEmail, recipientName, subject, templateType, orderNumber, contextData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cleanToEmail = (toEmail || '').toString().trim();
+  if (!cleanToEmail) {
+    Logger.log('sendTemplateEmail aborted: empty toEmail');
+    return;
+  }
   let bodyHtml = '';
 
   switch (templateType) {
     case 'Registration Verification':
-      bodyHtml = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; background: #0b0f19; color: #f3f4f6; border-radius: 12px;">' +
-        '<h2 style="color: #b19cd9;">Welcome to A\\'TIN Panay x Team KAAL Portal</h2>' +
+      bodyHtml = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; background: #0b0f19; color: #f3f4f6; border-radius: 12px; border: 1px solid #232f4b;">' +
+        '<h2 style="color: #b19cd9; margin-top: 0;">Welcome to A\\'TIN Panay Merch Portal</h2>' +
         '<p>Dear ' + (recipientName || 'Valued Fan') + ',</p>' +
-        '<p>Thank you for registering for the exclusive BlockScreening Merchandise portal.</p>' +
-        '<p style="padding: 16px; background: #1e1b4b; border-radius: 8px; font-size: 20px; font-weight: bold; text-align: center; color: #f472b6; letter-spacing: 4px;">' +
+        '<p>Thank you for registering your account on the official A\\'TIN Panay Merchandise portal.</p>' +
+        '<div style="background: #131b2e; border: 1px solid #232f4b; border-radius: 8px; padding: 12px 16px; margin: 16px 0;">' +
+        '<p style="margin: 0; font-size: 13px; color: #9ca3af;">Registered Account Email: <strong style="color: #ffffff;">' + cleanToEmail + '</strong></p>' +
+        '</div>' +
+        '<p>Please use the 6-digit verification code below to verify and activate your account:</p>' +
+        '<p style="padding: 16px; background: #1e1b4b; border: 1px solid #7c5cb7; border-radius: 8px; font-size: 26px; font-weight: bold; text-align: center; color: #f472b6; letter-spacing: 6px; margin: 16px 0;">' +
         (contextData.code || '883921') + '</p>' +
-        '<p>Enter this 6-digit code in the portal to verify your customer account.</p>' +
-        '<hr style="border-color: #232f4b;"/>' +
-        '<p style="font-size: 11px; color: #9ca3af;">A\\'TIN Panay BlockScreening 2026</p>' +
+        '<p style="font-size: 13px; color: #cbd5e1;">Enter this code on the verification screen in the portal.</p>' +
+        '<p style="font-size: 11px; color: #94a3b8;">If you did not register for this account, you can safely ignore this message.</p>' +
+        '<hr style="border: none; border-top: 1px solid #232f4b; margin: 20px 0;"/>' +
+        '<p style="font-size: 11px; color: #64748b; margin-bottom: 0;">A\\'TIN Panay BlockScreening 2026 • Single Source of Truth: APMERCH_DATABASE</p>' +
         '</div>';
       break;
 
@@ -1355,27 +1582,39 @@ function sendTemplateEmail(toEmail, recipientName, subject, templateType, orderN
 
   // Send email via Apps Script MailApp
   try {
-    MailApp.sendEmail({
-      to: toEmail,
-      bcc: SUPER_ADMIN_EMAIL,
+    const emailOptions = {
+      to: cleanToEmail,
       subject: subject,
       htmlBody: bodyHtml
-    });
+    };
+
+    // CRITICAL: Account verification codes are strictly private credentials for the creator of the account (cleanToEmail).
+    // NEVER BCC the superadmin or anyone else on private account verification codes.
+    // Superadmin is only optionally BCC'd on order-tracking notifications (e.g. order submission/status updates).
+    if (templateType !== 'Registration Verification') {
+      if (SUPER_ADMIN_EMAIL && SUPER_ADMIN_EMAIL.toLowerCase() !== cleanToEmail.toLowerCase()) {
+        emailOptions.bcc = SUPER_ADMIN_EMAIL;
+      }
+    }
+
+    MailApp.sendEmail(emailOptions);
 
     // Log email in EmailLogs tab of APMERCH_DATABASE
     const logsSheet = ss.getSheetByName('EmailLogs');
-    logsSheet.appendRow([
-      'EML-' + Utilities.getUuid().substring(0, 8).toUpperCase(),
-      toEmail,
-      recipientName,
-      subject,
-      templateType,
-      orderNumber || '',
-      'Sent',
-      new Date().toISOString(),
-      subject
-    ]);
-    SpreadsheetApp.flush();
+    if (logsSheet) {
+      logsSheet.appendRow([
+        'EML-' + Utilities.getUuid().substring(0, 8).toUpperCase(),
+        cleanToEmail,
+        recipientName,
+        subject,
+        templateType,
+        orderNumber || '',
+        'Sent',
+        new Date().toISOString(),
+        subject
+      ]);
+      SpreadsheetApp.flush();
+    }
   } catch (e) {
     Logger.log('MailApp error: ' + e);
   }

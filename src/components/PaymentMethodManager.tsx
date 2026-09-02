@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { PaymentMethodConfig } from '../types';
+import { INITIAL_PAYMENT_METHODS } from '../data/initialData';
 import { 
   Plus, 
   Trash2, 
@@ -17,8 +18,10 @@ import {
   Sparkles,
   Link,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Folder
 } from 'lucide-react';
+import { googleSheetsApi } from '../services/googleSheetsApi';
 
 interface PaymentMethodManagerProps {
   methods: PaymentMethodConfig[];
@@ -83,6 +86,17 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
   methods,
   onChange
 }) => {
+  const safeMethods: PaymentMethodConfig[] = useMemo(() => {
+    let list: any = methods;
+    if (typeof list === 'string') {
+      try { list = JSON.parse(list); } catch { list = null; }
+    }
+    if (Array.isArray(list) && list.length > 0) {
+      return list;
+    }
+    return INITIAL_PAYMENT_METHODS;
+  }, [methods]);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [lightboxQrUrl, setLightboxQrUrl] = useState<{ url: string; title: string } | null>(null);
@@ -137,7 +151,13 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
     try {
       setIsUploadingQr(true);
       const optimizedUrl = await optimizeQrCodeImage(file);
-      setFormQrCodeUrl(optimizedUrl);
+      let finalUrl = optimizedUrl;
+      try {
+        finalUrl = await googleSheetsApi.uploadImage(optimizedUrl, file.name, 'Payment_Qr');
+      } catch {
+        finalUrl = optimizedUrl;
+      }
+      setFormQrCodeUrl(finalUrl);
     } catch (err) {
       console.error('Error optimizing QR image:', err);
       alert('Could not process QR code image.');
@@ -154,7 +174,7 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
     }
 
     if (editingId) {
-      const updated = methods.map(m => {
+      const updated = safeMethods.map(m => {
         if (m.id === editingId) {
           return {
             ...m,
@@ -178,34 +198,34 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
         qrCodeUrl: formQrCodeUrl.trim() || undefined,
         instructions: formInstructions.trim() || undefined,
         active: formActive,
-        sortOrder: methods.length + 1
+        sortOrder: safeMethods.length + 1
       };
-      onChange([...methods, newMethod]);
+      onChange([...safeMethods, newMethod]);
     }
 
     setShowAddModal(false);
   };
 
   const handleDeleteMethod = (id: string) => {
-    if (methods.length <= 1) {
+    if (safeMethods.length <= 1) {
       alert('You must have at least one payment method configured.');
       return;
     }
     if (window.confirm('Are you sure you want to delete this payment method?')) {
-      onChange(methods.filter(m => m.id !== id));
+      onChange(safeMethods.filter(m => m.id !== id));
     }
   };
 
   const handleToggleActive = (id: string) => {
-    const updated = methods.map(m => m.id === id ? { ...m, active: !m.active } : m);
+    const updated = safeMethods.map(m => m.id === id ? { ...m, active: !m.active } : m);
     onChange(updated);
   };
 
   const handleMove = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= methods.length) return;
+    if (targetIndex < 0 || targetIndex >= safeMethods.length) return;
 
-    const reordered = [...methods];
+    const reordered = [...safeMethods];
     const temp = reordered[index];
     reordered[index] = reordered[targetIndex];
     reordered[targetIndex] = temp;
@@ -238,7 +258,7 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
 
       {/* Methods List */}
       <div className="space-y-3">
-        {methods.map((pm, idx) => (
+        {safeMethods.map((pm, idx) => (
           <div
             key={pm.id}
             className={`p-4 rounded-xl border transition-all ${
@@ -322,7 +342,7 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
                   </button>
                   <button
                     type="button"
-                    disabled={idx === methods.length - 1}
+                    disabled={idx === safeMethods.length - 1}
                     onClick={() => handleMove(idx, 'down')}
                     className="p-1.5 text-slate-400 hover:text-white disabled:opacity-30 disabled:hover:text-slate-400"
                     title="Move Down"
@@ -452,11 +472,17 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
 
               {/* QR Code Upload / Link Section */}
               <div className="p-4 rounded-xl bg-[#131b2e]/70 border border-[#232f4b] space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="font-semibold text-slate-200 flex items-center gap-1.5">
-                    <QrCode className="w-4 h-4 text-[#f472b6]" />
-                    <span>Official QR Code (JPG, PNG, WEBP)</span>
-                  </label>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <label className="font-semibold text-slate-200 flex items-center gap-1.5">
+                      <QrCode className="w-4 h-4 text-[#f472b6]" />
+                      <span>Official QR Code (JPG, PNG, WEBP)</span>
+                    </label>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                      <Folder className="w-3 h-3 text-emerald-400" />
+                      <span>APMERCH_DATAFOLDER/Payment_Qr</span>
+                    </span>
+                  </div>
 
                   <div className="flex items-center gap-1 bg-[#0b0f19] p-0.5 rounded-lg border border-[#232f4b]">
                     <button

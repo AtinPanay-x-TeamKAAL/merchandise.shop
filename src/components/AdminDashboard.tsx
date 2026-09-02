@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   ShieldCheck, 
@@ -29,13 +29,24 @@ import {
   Download,
   Code,
   MapPin,
-  Clock
+  Clock,
+  Heart,
+  BookOpen,
+  RotateCcw,
+  Folder,
+  Image as ImageIcon
 } from 'lucide-react';
 import { Product, Order, OrderStatus, ProductCategory, ProductSize, ProductGalleryItem, PaymentMethodConfig } from '../types';
 import { GOOGLE_APPS_SCRIPT_SOURCE } from '../services/googleAppsScriptCode';
+import { googleSheetsApi } from '../services/googleSheetsApi';
 import { ProductImageManager, GALLERY_PRESETS } from './ProductImageManager';
 import { PaymentMethodManager } from './PaymentMethodManager';
 import { INITIAL_PAYMENT_METHODS } from '../data/initialData';
+import { AdminCollectionsTab } from './admin/AdminCollectionsTab';
+import { AdminFanProjectsTab } from './admin/AdminFanProjectsTab';
+import { AdminLibraryTab } from './admin/AdminLibraryTab';
+import { ImageUploadField } from './ImageUploadField';
+import { LockInModal } from './LockInModal';
 
 export const AdminDashboard: React.FC = () => {
   const { 
@@ -45,17 +56,29 @@ export const AdminDashboard: React.FC = () => {
     orders, 
     settings, 
     emailLogs, 
+    collections,
+    fanProjects,
+    teamKaalItems,
     updateOrderStatus, 
     addNewProduct, 
     updateProduct, 
     deleteProduct, 
+    resetProductToDefault,
+    saveCollection,
+    deleteCollection,
+    saveFanProject,
+    deleteFanProject,
+    saveLibraryItem,
+    deleteLibraryItem,
     updateSettings, 
     syncWithGoogleSheets, 
     addToast,
     openModal
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'sheets' | 'emails' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'orders' | 'products' | 'collections' | 'fanprojects' | 'library' | 'sheets' | 'emails' | 'settings'
+  >('overview');
   
   // Orders filter & search
   const [orderStatusFilter, setOrderStatusFilter] = useState<'All' | OrderStatus>('All');
@@ -65,6 +88,8 @@ export const AdminDashboard: React.FC = () => {
   // Products state & modal
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [showProductLockModal, setShowProductLockModal] = useState(false);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
   
   // New/Edit product form fields
   const [pTitle, setPTitle] = useState('');
@@ -86,13 +111,47 @@ export const AdminDashboard: React.FC = () => {
   const [preorderDeadline, setPreorderDeadline] = useState(settings.preorderCloseDate);
   const [pickupDate, setPickupDate] = useState(settings.pickupDate);
   const [pickupLocation, setPickupLocation] = useState(settings.pickupLocation);
-  const [paymentMethodsList, setPaymentMethodsList] = useState<PaymentMethodConfig[]>(
-    settings.paymentMethods && settings.paymentMethods.length > 0
-      ? settings.paymentMethods
-      : INITIAL_PAYMENT_METHODS
-  );
+  const [logoUrl, setLogoUrl] = useState(settings.logoUrl || '');
+  const [teamKaalLogoUrl, setTeamKaalLogoUrl] = useState(settings.teamKaalLogoUrl || '');
+  const [homepageHeroImageUrl, setHomepageHeroImageUrl] = useState(settings.homepageHeroImageUrl || '');
+  const [homepageTagline, setHomepageTagline] = useState(settings.homepageTagline || "Official Panay Merch Capsule & Team KAAL Corner");
+  const [adminContactEmail, setAdminContactEmail] = useState(settings.adminContactEmail || 'admin@atinpanay.com');
+  const [paymentMethodsList, setPaymentMethodsList] = useState<PaymentMethodConfig[]>(() => {
+    let list: any = settings.paymentMethods;
+    if (typeof list === 'string') {
+      try { list = JSON.parse(list); } catch { list = null; }
+    }
+    if (Array.isArray(list) && list.length > 0) {
+      return list;
+    }
+    return INITIAL_PAYMENT_METHODS;
+  });
+
+  // Keep paymentMethodsList in sync if settings updates from cloud sync
+  useEffect(() => {
+    if (settings.paymentMethods) {
+      let list: any = settings.paymentMethods;
+      if (typeof list === 'string') {
+        try { list = JSON.parse(list); } catch { list = null; }
+      }
+      if (Array.isArray(list) && list.length > 0) {
+        setPaymentMethodsList(list);
+      }
+    }
+  }, [settings.paymentMethods]);
   const [copiedScript, setCopiedScript] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showSettingsLockModal, setShowSettingsLockModal] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isTestingGas, setIsTestingGas] = useState(false);
+  const [gasTestStatus, setGasTestStatus] = useState<{
+    tested: boolean;
+    success: boolean;
+    message: string;
+    sheetTitle?: string;
+    supportsUploadImage?: boolean;
+    durationMs?: number;
+  } | null>(null);
 
   // Metrics Calculations
   const metrics = useMemo(() => {
@@ -157,22 +216,76 @@ export const AdminDashboard: React.FC = () => {
     setTimeout(() => setCopiedScript(false), 2500);
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
+  const handleTestGasConnection = async () => {
+    setIsTestingGas(true);
+    setGasTestStatus(null);
+    try {
+      const res = await googleSheetsApi.testConnection();
+      setGasTestStatus({
+        tested: true,
+        success: res.success,
+        message: res.message,
+        sheetTitle: res.sheetTitle,
+        supportsUploadImage: res.supportsUploadImage,
+        durationMs: res.durationMs
+      });
+      if (res.success) {
+        if (res.supportsUploadImage) {
+          addToast('success', 'Backend Connected', `Connected to "${res.sheetTitle || 'APMERCH_DATABASE'}" in ${res.durationMs}ms with Drive image upload enabled.`);
+        } else {
+          addToast('info', 'Backend Connected (Update Available)', `Connected to "${res.sheetTitle || 'APMERCH_DATABASE'}" in ${res.durationMs}ms. Redeploy Apps Script to enable direct Google Drive folder uploads.`);
+        }
+      } else {
+        addToast('error', 'Connection Failed', res.message || 'Unable to connect to Google Apps Script. Please check your Web App URL and permissions.');
+      }
+    } catch (err: any) {
+      setGasTestStatus({
+        tested: true,
+        success: false,
+        message: err?.message || 'Connection test failed',
+        durationMs: 0
+      });
+      addToast('error', 'Connection Test Failed', err?.message || 'Check Web App URL.');
+    } finally {
+      setIsTestingGas(false);
+    }
+  };
+
+  const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings({
-      appsScriptUrl: gasUrl,
-      sheetName,
-      preorderCloseDate: preorderDeadline,
-      pickupDate,
-      pickupLocation,
-      paymentMethods: paymentMethodsList,
-      gcashAccountName: paymentMethodsList[0]?.accountName || 'Mae Joey Balla',
-      gcashNumber: paymentMethodsList[0]?.accountNumber || '09203963249',
-      gcashQrUrl: paymentMethodsList[0]?.qrCodeUrl,
-      maribankAccountName: paymentMethodsList.find(p => p.name.toLowerCase().includes('mari'))?.accountName || paymentMethodsList[1]?.accountName || 'Mae Joey Balla',
-      maribankNumber: paymentMethodsList.find(p => p.name.toLowerCase().includes('mari'))?.accountNumber || paymentMethodsList[1]?.accountNumber || '09203963249',
-      maribankQrUrl: paymentMethodsList.find(p => p.name.toLowerCase().includes('mari'))?.qrCodeUrl
-    });
+    setShowSettingsLockModal(true);
+  };
+
+  const handleConfirmLockSettings = async () => {
+    setIsSavingSettings(true);
+    try {
+      await updateSettings({
+        appsScriptUrl: gasUrl,
+        sheetName,
+        preorderCloseDate: preorderDeadline,
+        pickupDate,
+        pickupLocation,
+        logoUrl,
+        teamKaalLogoUrl,
+        homepageHeroImageUrl,
+        homepageTagline,
+        adminContactEmail,
+        paymentMethods: paymentMethodsList,
+        gcashAccountName: paymentMethodsList[0]?.accountName || 'Mae Joey Balla',
+        gcashNumber: paymentMethodsList[0]?.accountNumber || '09203963249',
+        gcashQrUrl: paymentMethodsList[0]?.qrCodeUrl,
+        maribankAccountName: paymentMethodsList.find(p => p.name.toLowerCase().includes('mari'))?.accountName || paymentMethodsList[1]?.accountName || 'Mae Joey Balla',
+        maribankNumber: paymentMethodsList.find(p => p.name.toLowerCase().includes('mari'))?.accountNumber || paymentMethodsList[1]?.accountNumber || '09203963249',
+        maribankQrUrl: paymentMethodsList.find(p => p.name.toLowerCase().includes('mari'))?.qrCodeUrl
+      });
+      setShowSettingsLockModal(false);
+      addToast('success', 'Settings Locked In', 'All branding, logos, and schedule settings are permanently locked in.');
+    } catch (err: any) {
+      console.error('Failed to lock in settings:', err);
+      alert(err.message || 'Failed to lock in settings.');
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
   const handleManualSync = async () => {
@@ -209,8 +322,8 @@ export const AdminDashboard: React.FC = () => {
 
   const handleOpenEditProduct = (p: Product) => {
     setEditingProduct(p);
-    setPTitle(p.title);
-    setPCategory(p.category);
+    setPTitle(p.title || '');
+    setPCategory(p.category || 'Apparel');
     setPPrice(String(p.price || p.basePrice || 0));
     setPXxlPrice(String(p.xxlPrice || ''));
     setPColor(p.color || '');
@@ -218,69 +331,90 @@ export const AdminDashboard: React.FC = () => {
     setPDimensions(p.dimensions || '');
     setPMaterial(p.material || '');
     
-    const existingGallery: ProductGalleryItem[] = (p.galleryImages && p.galleryImages.length > 0)
+    const existingGallery: ProductGalleryItem[] = (Array.isArray(p.galleryImages) && p.galleryImages.length > 0)
       ? p.galleryImages
-      : [{ label: 'Product View', url: p.imageUrl }];
+          .filter(Boolean)
+          .map((item: any, idx: number) => typeof item === 'string' ? { label: `Photo #${idx + 1}`, url: item } : { label: item?.label || `Photo #${idx + 1}`, url: item?.url || '' })
+          .filter(item => Boolean(item.url))
+      : (p.imageUrl ? [{ label: 'Product View', url: p.imageUrl }] : []);
 
     setPGalleryImages(existingGallery);
     setPImageUrl(p.imageUrl || existingGallery[0]?.url || '');
-    setPDescription(p.description);
+    setPDescription(p.description || '');
     setPHasSizes(Boolean(p.sizes && p.sizes.length > 0));
     setShowAddProductModal(true);
   };
 
-  const handleSaveProduct = async (e: React.FormEvent) => {
+  const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
-    const sizes: ProductSize[] | undefined = pHasSizes ? ['TS', 'XS', 'S', 'M', 'L', 'XL', 'XXL'] : undefined;
-    const finalCover = pImageUrl || pGalleryImages[0]?.url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&auto=format&fit=crop&q=80';
-    const finalGallery: ProductGalleryItem[] = pGalleryImages.length > 0
-      ? pGalleryImages
-      : [{ label: 'Product View', url: finalCover }];
-
-    if (editingProduct) {
-      await updateProduct({
-        ...editingProduct,
-        title: pTitle,
-        category: pCategory,
-        price: Number(pPrice),
-        basePrice: Number(pPrice),
-        xxlPrice: pXxlPrice ? Number(pXxlPrice) : undefined,
-        color: pColor,
-        capacity: pCapacity,
-        dimensions: pDimensions,
-        material: pMaterial,
-        imageUrl: finalCover,
-        galleryImages: finalGallery,
-        description: pDescription,
-        sizes
-      });
-    } else {
-      await addNewProduct({
-        title: pTitle,
-        category: pCategory,
-        price: Number(pPrice),
-        basePrice: Number(pPrice),
-        xxlPrice: pXxlPrice ? Number(pXxlPrice) : undefined,
-        color: pColor,
-        capacity: pCapacity,
-        dimensions: pDimensions,
-        material: pMaterial,
-        imageUrl: finalCover,
-        galleryImages: finalGallery,
-        description: pDescription,
-        sizes,
-        sizeChart: pHasSizes ? [
-          { size: 'TS', width: 17, length: 24 },
-          { size: 'XS', width: 18, length: 25 },
-          { size: 'S', width: 19, length: 26 },
-          { size: 'M', width: 20, length: 27 },
-          { size: 'L', width: 21, length: 28 },
-          { size: 'XL', width: 22, length: 29 },
-          { size: 'XXL', width: 23, length: 30 }
-        ] : undefined
-      });
+    if (!pTitle.trim()) {
+      alert('Please enter a product title.');
+      return;
     }
-    setShowAddProductModal(false);
+    setShowProductLockModal(true);
+  };
+
+  const handleConfirmLockProduct = async () => {
+    setIsSavingProduct(true);
+    try {
+      const sizes: ProductSize[] | undefined = pHasSizes ? ['TS', 'XS', 'S', 'M', 'L', 'XL', 'XXL'] : undefined;
+      const finalCover = pImageUrl || pGalleryImages[0]?.url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&auto=format&fit=crop&q=80';
+      const finalGallery: ProductGalleryItem[] = pGalleryImages.length > 0
+        ? pGalleryImages
+        : [{ label: 'Product View', url: finalCover }];
+
+      if (editingProduct) {
+        await updateProduct({
+          ...editingProduct,
+          title: pTitle,
+          category: pCategory,
+          price: Number(pPrice),
+          basePrice: Number(pPrice),
+          xxlPrice: pXxlPrice ? Number(pXxlPrice) : undefined,
+          color: pColor,
+          capacity: pCapacity,
+          dimensions: pDimensions,
+          material: pMaterial,
+          imageUrl: finalCover,
+          galleryImages: finalGallery,
+          description: pDescription,
+          sizes
+        });
+      } else {
+        await addNewProduct({
+          title: pTitle,
+          category: pCategory,
+          price: Number(pPrice),
+          basePrice: Number(pPrice),
+          xxlPrice: pXxlPrice ? Number(pXxlPrice) : undefined,
+          color: pColor,
+          capacity: pCapacity,
+          dimensions: pDimensions,
+          material: pMaterial,
+          imageUrl: finalCover,
+          galleryImages: finalGallery,
+          description: pDescription,
+          sizes,
+          sizeChart: pHasSizes ? [
+            { size: 'TS', width: 17, length: 24 },
+            { size: 'XS', width: 18, length: 25 },
+            { size: 'S', width: 19, length: 26 },
+            { size: 'M', width: 20, length: 27 },
+            { size: 'L', width: 21, length: 28 },
+            { size: 'XL', width: 22, length: 29 },
+            { size: 'XXL', width: 23, length: 30 }
+          ] : undefined
+        });
+      }
+      setShowProductLockModal(false);
+      setShowAddProductModal(false);
+      addToast('success', 'Product Locked In', `"${pTitle}" is locked in and will not revert.`);
+    } catch (err: any) {
+      console.error('Failed to lock in product:', err);
+      alert(err.message || 'Failed to save product.');
+    } finally {
+      setIsSavingProduct(false);
+    }
   };
 
   return (
@@ -331,10 +465,13 @@ export const AdminDashboard: React.FC = () => {
         {[
           { key: 'overview', label: 'Overview & Metrics', icon: TrendingUp },
           { key: 'orders', label: `Orders (${orders.length})`, icon: Package },
-          { key: 'products', label: `Merch Catalog (${products.length})`, icon: ShoppingBag },
+          { key: 'products', label: `Official Merch Capsule (${products.length})`, icon: ShoppingBag },
+          { key: 'collections', label: `Exclusive Collections (${collections.length})`, icon: Layers },
+          { key: 'fanprojects', label: `Panay Community (${fanProjects.length})`, icon: Heart },
+          { key: 'library', label: `KAAL Library (${teamKaalItems.length})`, icon: BookOpen },
           { key: 'sheets', label: 'Google Sheets Integration', icon: FileSpreadsheet },
           { key: 'emails', label: `Email Logs (${emailLogs.length})`, icon: Mail },
-          { key: 'settings', label: 'Settings', icon: SettingsIcon },
+          { key: 'settings', label: 'Editable Settings & Logos', icon: SettingsIcon },
         ].map(tab => {
           const Icon = tab.icon;
           return (
@@ -598,17 +735,23 @@ export const AdminDashboard: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {products.map(p => {
-              const gallery = (p.galleryImages && p.galleryImages.length > 0)
+              const rawGallery = Array.isArray(p.galleryImages) && p.galleryImages.length > 0
                 ? p.galleryImages
-                : [{ label: 'Product View', url: p.imageUrl }];
-              const coverUrl = p.imageUrl || gallery[0]?.url;
+                : (p.imageUrl ? [{ label: 'Product View', url: p.imageUrl }] : []);
+
+              const gallery: ProductGalleryItem[] = rawGallery
+                .filter(Boolean)
+                .map((item: any, idx: number) => typeof item === 'string' ? { label: `Photo #${idx + 1}`, url: item } : { label: item?.label || `Photo #${idx + 1}`, url: item?.url || '' })
+                .filter(item => Boolean(item.url));
+
+              const coverUrl = p.imageUrl || gallery[0]?.url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&auto=format&fit=crop&q=80';
 
               return (
                 <div key={p.id} className="p-4 rounded-2xl bg-[#131b2e] border border-[#232f4b] hover:border-[#7c5cb7]/60 transition-all space-y-3 flex flex-col justify-between shadow-lg">
                   <div className="space-y-2.5">
                     {/* Image Stage & Gallery Badge */}
                     <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-black border border-[#232f4b] group">
-                      <img src={coverUrl} alt={p.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      <img src={coverUrl} alt={p.title || 'Product'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                       
                       <div className="absolute top-2 left-2 flex items-center gap-1.5">
                         <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-[#0b0f19]/80 backdrop-blur-sm text-[#b19cd9] border border-[#7c5cb7]/40 shadow-sm">
@@ -628,7 +771,7 @@ export const AdminDashboard: React.FC = () => {
                         <div className="absolute bottom-2 inset-x-2 flex gap-1 justify-center bg-black/60 backdrop-blur-sm p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
                           {gallery.slice(0, 4).map((g, gi) => (
                             <div key={gi} className="w-7 h-7 rounded overflow-hidden border border-white/20">
-                              <img src={g.url} alt={g.label} className="w-full h-full object-cover" />
+                              <img src={g.url || coverUrl} alt={g.label || 'Product thumbnail'} className="w-full h-full object-cover" />
                             </div>
                           ))}
                           {gallery.length > 4 && (
@@ -667,8 +810,23 @@ export const AdminDashboard: React.FC = () => {
                       <Edit3 className="w-3.5 h-3.5" /> Manage Images & Details
                     </button>
                     <button
-                      onClick={() => deleteProduct(p.id)}
-                      className="px-3 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900 border border-rose-500/40 text-xs font-bold text-rose-300 flex items-center gap-1 transition-colors"
+                      onClick={() => {
+                        if (confirm(`Reset "${p.title}" to its original default preset template? Any uploaded photo or custom edits will be restored to default.`)) {
+                          resetProductToDefault(p.id);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg bg-amber-950/40 hover:bg-amber-900 border border-amber-500/40 text-xs font-bold text-amber-300 flex items-center gap-1 transition-colors"
+                      title="Reset to Default Preset"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete product "${p.title}" from APMERCH_DATABASE?`)) {
+                          deleteProduct(p.id);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900 border border-rose-500/40 text-xs font-bold text-rose-300 flex items-center gap-1 transition-colors"
                       title="Delete Product"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -679,6 +837,33 @@ export const AdminDashboard: React.FC = () => {
             })}
           </div>
         </div>
+      )}
+
+      {/* EXCLUSIVE COLLECTIONS TAB */}
+      {activeTab === 'collections' && (
+        <AdminCollectionsTab
+          collections={collections}
+          onSave={saveCollection}
+          onDelete={deleteCollection}
+        />
+      )}
+
+      {/* PANAY COMMUNITY & FAN PROJECTS TAB */}
+      {activeTab === 'fanprojects' && (
+        <AdminFanProjectsTab
+          fanProjects={fanProjects}
+          onSave={saveFanProject}
+          onDelete={deleteFanProject}
+        />
+      )}
+
+      {/* TEAM KAAL LIBRARY CORNER TAB */}
+      {activeTab === 'library' && (
+        <AdminLibraryTab
+          items={teamKaalItems}
+          onSave={saveLibraryItem}
+          onDelete={deleteLibraryItem}
+        />
       )}
 
       {/* TAB 4: GOOGLE SHEETS & BACKEND SCRIPT SETUP */}
@@ -866,6 +1051,90 @@ export const AdminDashboard: React.FC = () => {
             />
           </div>
 
+          {/* Official Logos & Branding (APMERCH_DATAFOLDER/Logos) */}
+          <div className="p-6 rounded-2xl bg-[#131b2e] border border-[#232f4b] space-y-4">
+            <div className="border-b border-[#232f4b] pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Folder className="w-5 h-5 text-[#f472b6]" />
+                <span>Logos & Brand Identity (APMERCH_DATAFOLDER/Logos)</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Custom uploaded logos will be saved to Google Drive and locked in so they never revert to defaults.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <ImageUploadField
+                label="A'TIN Panay Main Community Logo"
+                folder="Logos"
+                value={logoUrl}
+                onChange={setLogoUrl}
+                aspectRatio="square"
+                hint="Upload official Panay logo (PNG/SVG recommended)"
+              />
+              <ImageUploadField
+                label="Team KAAL Official Logo / Crest"
+                folder="Logos"
+                value={teamKaalLogoUrl}
+                onChange={setTeamKaalLogoUrl}
+                aspectRatio="square"
+                hint="Upload official Team KAAL insignia"
+              />
+            </div>
+          </div>
+
+          {/* Homepage & Portal Experience (APMERCH_DATAFOLDER/Homepage) */}
+          <div className="p-6 rounded-2xl bg-[#131b2e] border border-[#232f4b] space-y-4">
+            <div className="border-b border-[#232f4b] pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <ImageIcon className="w-5 h-5 text-[#9381ff]" />
+                <span>Homepage Hero & Experience (APMERCH_DATAFOLDER/Homepage)</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Custom hero graphics, banners, and editable community headlines.
+              </p>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <ImageUploadField
+                label="Homepage Hero Showcase Banner"
+                folder="Homepage"
+                value={homepageHeroImageUrl}
+                onChange={setHomepageHeroImageUrl}
+                aspectRatio="banner"
+                hint="High-resolution wide banner for landing hero section"
+              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Homepage Slogan / Tagline
+                  </label>
+                  <input
+                    type="text"
+                    value={homepageTagline}
+                    onChange={e => setHomepageTagline(e.target.value)}
+                    placeholder="Official Panay Merch Capsule & Team KAAL Corner"
+                    className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Customer Support Email
+                  </label>
+                  <input
+                    type="email"
+                    value={adminContactEmail}
+                    onChange={e => setAdminContactEmail(e.target.value)}
+                    placeholder="admin@atinpanay.com"
+                    className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Google Sheets APMERCH_DATABASE Integration */}
           <div className="p-6 rounded-2xl bg-[#131b2e] border border-[#232f4b] space-y-4">
             <div className="border-b border-[#232f4b] pb-3">
@@ -905,30 +1174,112 @@ export const AdminDashboard: React.FC = () => {
                 />
               </div>
 
-              <div className="flex items-end">
+              <div className="flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestGasConnection}
+                  disabled={isTestingGas || !gasUrl}
+                  className="flex-1 px-3 py-2 bg-[#172554] hover:bg-[#1e3a8a] border border-[#2563eb]/40 rounded-xl text-xs font-bold text-blue-300 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingGas ? 'animate-spin' : ''}`} />
+                  <span>{isTestingGas ? 'Testing...' : 'Test Connection'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={handleCopyGasCode}
-                  className="w-full px-4 py-2 bg-[#1e1b4b] hover:bg-[#2d1b69] border border-[#3b2b73] rounded-xl text-xs font-bold text-[#b19cd9] flex items-center justify-center gap-2"
+                  className="flex-1 px-3 py-2 bg-[#1e1b4b] hover:bg-[#2d1b69] border border-[#3b2b73] rounded-xl text-xs font-bold text-[#b19cd9] flex items-center justify-center gap-1.5 transition-colors"
                 >
-                  <Code className="w-4 h-4" />
-                  <span>{copiedScript ? 'Script Copied!' : 'Copy Apps Script Code'}</span>
+                  <Code className="w-3.5 h-3.5" />
+                  <span>{copiedScript ? 'Copied!' : 'Copy Script Code'}</span>
                 </button>
               </div>
+            </div>
+
+            {/* Test Connection Result Box */}
+            {gasTestStatus && gasTestStatus.tested && (
+              <div className={`p-3 rounded-xl text-xs flex items-start gap-2.5 border ${
+                gasTestStatus.success 
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+              }`}>
+                {gasTestStatus.success ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                )}
+                <div className="flex-1 space-y-1">
+                  <p className="font-bold">
+                    {gasTestStatus.success ? 'Google Apps Script Connected' : 'Connection Failed'}
+                    {gasTestStatus.durationMs ? ` (${gasTestStatus.durationMs}ms)` : ''}
+                  </p>
+                  <p className="text-[11px] opacity-90">{gasTestStatus.message}</p>
+                  {gasTestStatus.success && (
+                    <div className="flex flex-wrap items-center gap-2 pt-1 text-[10px]">
+                      <span className="px-2 py-0.5 rounded-md bg-[#0b0f19] border border-[#232f4b] text-slate-300">
+                        Sheet: <strong>{gasTestStatus.sheetTitle || sheetName}</strong>
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-md border ${
+                        gasTestStatus.supportsUploadImage 
+                          ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' 
+                          : 'bg-amber-950/60 border-amber-500/40 text-amber-300'
+                      }`}>
+                        Drive Folder Upload: <strong>{gasTestStatus.supportsUploadImage ? 'Enabled' : 'Update Available'}</strong>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Apps Script Update Notice if uploadImage is not yet supported */}
+            {(googleSheetsApi.getIsUploadImageSupported() === false || (gasTestStatus && gasTestStatus.tested && !gasTestStatus.supportsUploadImage)) && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold text-amber-300">Google Apps Script Deployment Update Available</p>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    Your current deployed Web App is running an earlier script version without the direct Drive folder uploader (<code className="text-amber-300 font-mono">uploadImage</code>). Photos uploaded in the app are currently safely saved and synced as optimized web data URLs.
+                  </p>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    To store photos directly in your Google Drive folders (<code className="text-amber-300 font-mono">APMERCH_DATAFOLDER</code>):
+                    <br />
+                    1. Click <strong>Copy Script Code</strong> above.
+                    <br />
+                    2. In your Google Sheet, click <strong>Extensions &gt; Apps Script</strong> and paste the updated code.
+                    <br />
+                    3. Click <strong>Deploy &gt; Manage deployments &gt; Edit (pencil icon) &gt; Version: New version &gt; Deploy</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Quick Deployment Guide */}
+            <div className="p-3 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-xs text-slate-300 space-y-1.5">
+              <p className="font-semibold text-white flex items-center gap-1.5">
+                <Code className="w-3.5 h-3.5 text-[#b19cd9]" />
+                <span>How to Deploy or Update Google Apps Script</span>
+              </p>
+              <ol className="list-decimal list-inside text-[11px] text-slate-400 space-y-1">
+                <li>Click <strong>Copy Script Code</strong> and open your Google Sheet (<strong>Extensions &gt; Apps Script</strong>).</li>
+                <li>Paste all code into <code>Code.gs</code> and click <strong>Save</strong>.</li>
+                <li>Click <strong>Deploy &gt; Manage deployments &gt; Edit (pencil) &gt; Version: New version &gt; Deploy</strong>.</li>
+                <li>Ensure <em>Who has access</em> is set to <strong>Anyone</strong>.</li>
+              </ol>
             </div>
           </div>
 
           {/* Action Bar */}
           <div className="p-4 rounded-2xl bg-[#0b0f19] border border-[#232f4b] flex items-center justify-between">
             <p className="text-xs text-slate-400">
-              Changes will immediately take effect for the checkout flow and customer portal.
+              Changes will be permanently locked in to APMERCH_DATABASE and your Google Drive structure.
             </p>
             <button
               type="submit"
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#7c5cb7] to-[#9381ff] text-white text-xs font-bold shadow-lg shadow-[#7c5cb7]/25 hover:opacity-95 flex items-center gap-2"
             >
               <Save className="w-4 h-4" />
-              <span>Save All Settings</span>
+              <span>Save & Lock In All Settings</span>
             </button>
           </div>
         </form>
@@ -1176,6 +1527,28 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Lock-In Confirmation for Merchandise Items */}
+      <LockInModal
+        isOpen={showProductLockModal}
+        title={editingProduct ? 'Lock In Merchandise Changes?' : 'Lock In New Merchandise Item?'}
+        itemDescription={`"${pTitle || 'Merchandise Item'}" will have its gallery photos and specs permanently preserved in APMERCH_DATAFOLDER/Merchandise and APMERCH_DATABASE.`}
+        folderName="Merchandise"
+        isSaving={isSavingProduct}
+        onConfirm={handleConfirmLockProduct}
+        onCancel={() => setShowProductLockModal(false)}
+      />
+
+      {/* Lock-In Confirmation for Admin Settings */}
+      <LockInModal
+        isOpen={showSettingsLockModal}
+        title="Lock In Global Settings & Logos?"
+        itemDescription="This will commit the schedule cut-offs, payment QR codes, branding logos, and hero graphics to the APMERCH_DATABASE and APMERCH_DATAFOLDER. The settings will NOT revert upon refresh."
+        folderName="Homepage / Logos"
+        isSaving={isSavingSettings}
+        onConfirm={handleConfirmLockSettings}
+        onCancel={() => setShowSettingsLockModal(false)}
+      />
 
     </div>
   );

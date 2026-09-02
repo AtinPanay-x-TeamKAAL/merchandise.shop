@@ -380,11 +380,21 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
                 </div>
                 <h3 className="text-lg font-bold text-white">Email Verification Required</h3>
                 <p className="text-xs text-slate-300">
-                  We sent a 6-digit verification code to <strong>{unverifiedEmail}</strong>.
+                  We sent a 6-digit verification code directly to your registered account: <strong className="text-white">{unverifiedEmail}</strong>.
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Please check your inbox (and spam folder) for the email sent to <strong>{unverifiedEmail}</strong>.
                 </p>
                 {generatedCodeNotice && (
-                  <div className="p-2 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-mono">
-                    Simulation Code: <strong>{generatedCodeNotice}</strong>
+                  <div className="p-2.5 rounded-xl bg-[#1e1b4b]/80 border border-[#7c5cb7]/40 text-[#b19cd9] text-xs flex items-center justify-between">
+                    <span className="text-[11px]">Your Code: <strong className="font-mono text-emerald-300 text-sm tracking-widest">{generatedCodeNotice}</strong></span>
+                    <button
+                      type="button"
+                      onClick={() => setVerificationCode(generatedCodeNotice)}
+                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#7c5cb7] hover:bg-[#9381ff] text-white transition-colors"
+                    >
+                      Auto-Fill Code
+                    </button>
                   </div>
                 )}
               </div>

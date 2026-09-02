@@ -261,7 +261,12 @@ export interface AppSettings {
   deliveryOptionEnabled: boolean;
   announcementText: string;
   supportEmail: string;
+  adminContactEmail?: string;
   organizerName: string;
+  logoUrl?: string;
+  teamKaalLogoUrl?: string;
+  homepageHeroImageUrl?: string;
+  homepageTagline?: string;
 }
 
 export interface CartItem {

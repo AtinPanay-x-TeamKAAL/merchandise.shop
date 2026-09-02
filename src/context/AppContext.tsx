@@ -119,9 +119,14 @@ interface AppContextType {
   addNewProduct: (product: Omit<Product, 'id' | 'slug' | 'isAvailable' | 'galleryImages'> & Partial<Product>) => Promise<Product>;
   updateProduct: (product: Product) => Promise<Product>;
   deleteProduct: (productId: string) => Promise<boolean>;
+  resetProductToDefault: (productId: string) => Promise<void>;
   saveCollection: (col: CollectionItem) => Promise<CollectionItem>;
+  deleteCollection: (id: string) => Promise<boolean>;
   saveFanProject: (fp: FanProject) => Promise<FanProject>;
+  deleteFanProject: (id: string) => Promise<boolean>;
   saveLibraryItem: (item: TeamKAALLibraryItem) => Promise<TeamKAALLibraryItem>;
+  deleteLibraryItem: (id: string) => Promise<boolean>;
+  uploadDriveImage: (fileData: string, fileName: string, folder: 'Payment_Qr' | 'Logos' | 'Merchandise' | 'Collection' | 'FanProjects' | 'Homepage' | 'TeamKAAL') => Promise<string>;
   updateOrderStatus: (orderNumber: string, status: OrderStatus, paymentStatus?: PaymentStatus, notes?: string, sendEmail?: boolean) => Promise<Order>;
   updateSettings: (newSettings: Partial<AppSettings>) => Promise<AppSettings>;
   sendManualEmail: (toEmail: string, recipientName: string, subject: string, templateType: EmailTemplateType, orderNumber?: string, customBody?: string) => Promise<EmailLog>;
@@ -222,8 +227,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }
     } catch (error) {
-      console.error('APMERCH_DATABASE synchronization error:', error);
-      throw error;
+      console.warn('APMERCH_DATABASE synchronization notice:', error);
     }
   };
 
@@ -605,25 +609,60 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return deleted;
   };
 
+  const resetProductToDefault = async (productId: string) => {
+    googleSheetsApi.resetProductToDefault(productId);
+    await refreshData();
+    addToast('info', 'Product Reset', 'Product restored to default template.');
+  };
+
   const saveCollection = async (col: CollectionItem) => {
     const saved = await googleSheetsApi.saveCollection(col);
     await refreshData();
-    addToast('success', 'Collection Saved', `Collection "${col.title}" updated in APMERCH_DATABASE.`);
+    addToast('success', 'Collection Saved & Locked', `Collection "${col.title}" locked in APMERCH_DATABASE.`);
     return saved;
+  };
+
+  const deleteCollection = async (id: string) => {
+    const deleted = await googleSheetsApi.deleteCollection(id);
+    await refreshData();
+    addToast('info', 'Collection Removed', 'Collection item removed.');
+    return deleted;
   };
 
   const saveFanProject = async (fp: FanProject) => {
     const saved = await googleSheetsApi.saveFanProject(fp);
     await refreshData();
-    addToast('success', 'Fan Project Saved', `Fan project "${fp.title}" updated in APMERCH_DATABASE.`);
+    addToast('success', 'Fan Project Saved & Locked', `Fan project "${fp.title}" locked in APMERCH_DATABASE.`);
     return saved;
+  };
+
+  const deleteFanProject = async (id: string) => {
+    const deleted = await googleSheetsApi.deleteFanProject(id);
+    await refreshData();
+    addToast('info', 'Fan Project Removed', 'Fan project removed.');
+    return deleted;
   };
 
   const saveLibraryItem = async (item: TeamKAALLibraryItem) => {
     const saved = await googleSheetsApi.saveLibraryItem(item);
     await refreshData();
-    addToast('success', 'Library Item Saved', `"${item.title}" saved to Team KAAL Corner.`);
+    addToast('success', 'Library Item Saved & Locked', `"${item.title}" locked into Team KAAL Corner.`);
     return saved;
+  };
+
+  const deleteLibraryItem = async (id: string) => {
+    const deleted = await googleSheetsApi.deleteLibraryItem(id);
+    await refreshData();
+    addToast('info', 'Library Item Removed', 'Library item removed.');
+    return deleted;
+  };
+
+  const uploadDriveImage = async (
+    fileData: string, 
+    fileName: string, 
+    folder: 'Payment_Qr' | 'Logos' | 'Merchandise' | 'Collection' | 'FanProjects' | 'Homepage' | 'TeamKAAL'
+  ): Promise<string> => {
+    return await googleSheetsApi.uploadImage(fileData, fileName, folder);
   };
 
   const updateOrderStatus = async (
@@ -763,9 +802,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addNewProduct,
         updateProduct,
         deleteProduct,
+        resetProductToDefault,
         saveCollection,
+        deleteCollection,
         saveFanProject,
+        deleteFanProject,
         saveLibraryItem,
+        deleteLibraryItem,
+        uploadDriveImage,
         updateOrderStatus,
         updateSettings,
         sendManualEmail,

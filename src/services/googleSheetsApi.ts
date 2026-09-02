@@ -5,6 +5,7 @@ import {
   AdminUser, 
   PaymentRecord, 
   AppSettings, 
+  PaymentMethodConfig,
   CollectionItem, 
   FanProject, 
   TeamKAALLibraryItem, 
@@ -16,6 +17,7 @@ import {
 import { 
   INITIAL_PRODUCTS, 
   INITIAL_SETTINGS, 
+  INITIAL_PAYMENT_METHODS,
   INITIAL_COLLECTIONS, 
   INITIAL_FAN_PROJECTS, 
   INITIAL_LIBRARY_ITEMS,
@@ -39,6 +41,14 @@ import {
  * 5. Concurrency locks prevent duplicate IDs during simultaneous checkouts.
  * ============================================================================
  */
+const STORAGE_KEYS = {
+  LOCKED_PRODUCTS: 'APMERCH_LOCKED_PRODUCTS',
+  LOCKED_COLLECTIONS: 'APMERCH_LOCKED_COLLECTIONS',
+  LOCKED_FAN_PROJECTS: 'APMERCH_LOCKED_FAN_PROJECTS',
+  LOCKED_LIBRARY_ITEMS: 'APMERCH_LOCKED_LIBRARY_ITEMS',
+  LOCKED_SETTINGS: 'APMERCH_LOCKED_SETTINGS'
+};
+
 class GoogleSheetsApiService {
   private settings: AppSettings = INITIAL_SETTINGS;
   private products: Product[] = INITIAL_PRODUCTS;
@@ -50,15 +60,107 @@ class GoogleSheetsApiService {
   private fanProjects: FanProject[] = INITIAL_FAN_PROJECTS;
   private libraryItems: TeamKAALLibraryItem[] = INITIAL_LIBRARY_ITEMS;
   private emailLogs: EmailLog[] = [];
+  private isUploadImageSupported: boolean | null = null;
+  private activeSyncPromise: Promise<any> | null = null;
+
+  /**
+   * Sanitizes settings to ensure nested objects like paymentMethods are always valid arrays,
+   * even if serialized as a JSON string by Google Sheets or localStorage.
+   */
+  private sanitizeSettings(rawSettings: any): AppSettings {
+    if (!rawSettings || typeof rawSettings !== 'object') {
+      return { ...INITIAL_SETTINGS };
+    }
+
+    let paymentMethods = rawSettings.paymentMethods;
+    if (typeof paymentMethods === 'string') {
+      try {
+        paymentMethods = JSON.parse(paymentMethods);
+      } catch {
+        paymentMethods = null;
+      }
+    }
+
+    if (!Array.isArray(paymentMethods) || paymentMethods.length === 0) {
+      paymentMethods = INITIAL_PAYMENT_METHODS;
+    }
+
+    const safePaymentMethods: PaymentMethodConfig[] = paymentMethods
+      .filter((pm: any) => pm && typeof pm === 'object')
+      .map((pm: any, idx: number) => ({
+        id: String(pm.id || `pm-${idx + 1}`),
+        name: String(pm.name || 'Payment Option'),
+        accountName: String(pm.accountName || rawSettings.gcashAccountName || 'Mae Joey Balla'),
+        accountNumber: String(pm.accountNumber || rawSettings.gcashNumber || '09203963249'),
+        qrCodeUrl: pm.qrCodeUrl || '',
+        instructions: pm.instructions || '',
+        active: pm.active !== false,
+        sortOrder: typeof pm.sortOrder === 'number' ? pm.sortOrder : idx + 1,
+        badge: pm.badge || undefined
+      }));
+
+    return {
+      ...INITIAL_SETTINGS,
+      ...rawSettings,
+      paymentMethods: safePaymentMethods.length > 0 ? safePaymentMethods : INITIAL_PAYMENT_METHODS
+    };
+  }
 
   constructor() {
+    // Load locked persistent state so user uploads and edits NEVER revert on restart
+    try {
+      if (typeof window !== 'undefined') {
+        const storedProducts = localStorage.getItem(STORAGE_KEYS.LOCKED_PRODUCTS);
+        if (storedProducts) {
+          const parsed = JSON.parse(storedProducts);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.products = parsed;
+          }
+        }
+        const storedCollections = localStorage.getItem(STORAGE_KEYS.LOCKED_COLLECTIONS);
+        if (storedCollections) {
+          const parsed = JSON.parse(storedCollections);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.collections = parsed;
+          }
+        }
+        const storedFanProjects = localStorage.getItem(STORAGE_KEYS.LOCKED_FAN_PROJECTS);
+        if (storedFanProjects) {
+          const parsed = JSON.parse(storedFanProjects);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.fanProjects = parsed;
+          }
+        }
+        const storedLibraryItems = localStorage.getItem(STORAGE_KEYS.LOCKED_LIBRARY_ITEMS);
+        if (storedLibraryItems) {
+          const parsed = JSON.parse(storedLibraryItems);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.libraryItems = parsed;
+          }
+        }
+        const storedSettings = localStorage.getItem(STORAGE_KEYS.LOCKED_SETTINGS);
+        if (storedSettings) {
+          const parsed = JSON.parse(storedSettings);
+          if (parsed && typeof parsed === 'object') {
+            this.settings = this.sanitizeSettings({ ...this.settings, ...parsed });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[APMERCH_DATABASE] Error loading locked persistence cache:', e);
+    }
+
     const storedGasUrl = typeof window !== 'undefined' ? localStorage.getItem('APMERCH_APPS_SCRIPT_URL') || '' : '';
     const envGasUrl = import.meta.env.VITE_APPS_SCRIPT_URL || '';
     this.settings.appsScriptUrl = this.normalizeUrl(this.settings.appsScriptUrl || storedGasUrl || envGasUrl);
-    if (this.settings.appsScriptUrl) {
-      this.syncWithSheet().catch(err => {
-        console.warn('[APMERCH_DATABASE] Automatic startup sync error:', err);
-      });
+  }
+
+  public persistLockedData(key: string, data: any): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (e) {
+      console.warn(`[APMERCH_DATABASE] Persistent lock cache write warning (${key}):`, e);
     }
   }
 
@@ -96,11 +198,20 @@ class GoogleSheetsApiService {
    * Provides detailed error logging (HTTP status, response body, Apps Script error, fetch error).
    * Throws an explicit error on failure — NEVER returns null silently.
    */
-  public async executeAppsScript(action: string, payload: any = {}): Promise<any> {
+  public async executeAppsScript(
+    action: string, 
+    payload: any = {}, 
+    options?: { silentError?: boolean },
+    retryCount: number = 0
+  ): Promise<any> {
     const url = this.getAppsScriptUrl();
     if (!url) {
       const errMessage = `[APMERCH_DATABASE] executeAppsScript error: Google Apps Script Web App URL is not configured. Please set import.meta.env.VITE_APPS_SCRIPT_URL or configure the Apps Script URL in Settings.`;
-      console.error(errMessage, { action, payload });
+      if (options?.silentError || action === 'uploadImage') {
+        console.warn(errMessage);
+      } else {
+        console.error(errMessage, { action, payload });
+      }
       throw new Error(errMessage);
     }
 
@@ -112,7 +223,7 @@ class GoogleSheetsApiService {
 
     console.log(`[APMERCH_DATABASE] executeAppsScript: Sending POST request for action="${action}" to ${url}`, {
       action,
-      payloadPreview: bodyString.length > 300 ? bodyString.substring(0, 300) + '...' : bodyString
+      payloadPreview: bodyString && bodyString.length > 300 ? bodyString.substring(0, 300) + '...' : (bodyString || '')
     });
 
     let response: Response;
@@ -125,11 +236,15 @@ class GoogleSheetsApiService {
       });
     } catch (fetchErr: any) {
       const fetchErrMsg = `[APMERCH_DATABASE] Fetch error for action="${action}": ${fetchErr?.message || fetchErr}`;
-      console.error(fetchErrMsg, {
-        action,
-        url,
-        error: fetchErr
-      });
+      if (options?.silentError || action === 'uploadImage') {
+        console.warn(fetchErrMsg);
+      } else {
+        console.error(fetchErrMsg, {
+          action,
+          url,
+          error: fetchErr
+        });
+      }
       throw new Error(
         `Failed to reach Google Apps Script (${action}): ${fetchErr?.message || 'Network/CORS error'}. ` +
         `Please verify that your Google Apps Script Web App is deployed with "Who has access: Anyone" and "Execute as: Me".`
@@ -144,33 +259,47 @@ class GoogleSheetsApiService {
       responseBody = await response.text();
     } catch (readErr: any) {
       const readErrMsg = `[APMERCH_DATABASE] Failed to read response stream for action="${action}" (HTTP ${httpStatus}): ${readErr?.message || readErr}`;
-      console.error(readErrMsg, readErr);
+      if (options?.silentError || action === 'uploadImage') {
+        console.warn(readErrMsg);
+      } else {
+        console.error(readErrMsg, readErr);
+      }
       throw new Error(readErrMsg);
     }
+
+    const safeResBody = typeof responseBody === 'string' ? responseBody : '';
 
     console.log(`[APMERCH_DATABASE] executeAppsScript response for action="${action}":`, {
       httpStatus,
       httpStatusText,
-      responseBodyLength: responseBody.length,
-      responseBodyPreview: responseBody.length > 500 ? responseBody.substring(0, 500) + '...' : responseBody
+      responseBodyLength: safeResBody.length,
+      responseBodyPreview: safeResBody.length > 500 ? safeResBody.substring(0, 500) + '...' : safeResBody
     });
 
     if (!response.ok) {
-      const httpErrMsg = `[APMERCH_DATABASE] Google Apps Script returned HTTP error ${httpStatus} (${httpStatusText}) for action="${action}": ${responseBody}`;
-      console.error(httpErrMsg);
-      throw new Error(`Google Apps Script HTTP Error ${httpStatus} (${httpStatusText}): ${responseBody.substring(0, 300)}`);
+      const httpErrMsg = `[APMERCH_DATABASE] Google Apps Script returned HTTP error ${httpStatus} (${httpStatusText}) for action="${action}": ${safeResBody}`;
+      if (options?.silentError || action === 'uploadImage') {
+        console.warn(httpErrMsg);
+      } else {
+        console.error(httpErrMsg);
+      }
+      throw new Error(`Google Apps Script HTTP Error ${httpStatus} (${httpStatusText}): ${safeResBody.substring(0, 300)}`);
     }
 
     let parsedData: any;
     try {
-      parsedData = JSON.parse(responseBody);
+      parsedData = JSON.parse(safeResBody);
     } catch (jsonErr: any) {
-      console.error(`[APMERCH_DATABASE] Google Apps Script returned non-JSON response for action="${action}":`, {
-        httpStatus,
-        responseBody
-      });
-      const titleMatch = responseBody.match(/<title>([^<]+)<\/title>/i);
-      const errorDetail = titleMatch && titleMatch[1] ? titleMatch[1].trim() : responseBody.substring(0, 250);
+      if (options?.silentError || action === 'uploadImage') {
+        console.warn(`[APMERCH_DATABASE] Google Apps Script returned non-JSON response for action="${action}": HTTP ${httpStatus}`);
+      } else {
+        console.error(`[APMERCH_DATABASE] Google Apps Script returned non-JSON response for action="${action}":`, {
+          httpStatus,
+          responseBody: safeResBody
+        });
+      }
+      const titleMatch = safeResBody.match(/<title>([^<]+)<\/title>/i);
+      const errorDetail = titleMatch && titleMatch[1] ? titleMatch[1].trim() : safeResBody.substring(0, 250);
       throw new Error(
         `Google Apps Script returned invalid JSON (HTTP ${httpStatus}): ${errorDetail}. Please check deployment and permissions.`
       );
@@ -178,16 +307,35 @@ class GoogleSheetsApiService {
 
     if (!parsedData || typeof parsedData !== 'object') {
       const invalidDataMsg = `[APMERCH_DATABASE] Google Apps Script returned invalid payload structure for action="${action}": ${responseBody}`;
-      console.error(invalidDataMsg);
+      if (options?.silentError || action === 'uploadImage') {
+        console.warn(invalidDataMsg);
+      } else {
+        console.error(invalidDataMsg);
+      }
       throw new Error(invalidDataMsg);
     }
 
     if (parsedData.success === false) {
       const scriptErrorMsg = parsedData.error || parsedData.message || 'Unknown error occurred in Apps Script';
-      console.error(`[APMERCH_DATABASE] Apps Script returned failure for action="${action}":`, {
-        error: scriptErrorMsg,
-        data: parsedData
-      });
+      const isLockTimeout = typeof scriptErrorMsg === 'string' && (
+        scriptErrorMsg.toLowerCase().includes('lock acquisition timeout') ||
+        scriptErrorMsg.toLowerCase().includes('database lock')
+      );
+
+      if (isLockTimeout && retryCount < 2) {
+        console.warn(`[APMERCH_DATABASE] Database lock acquisition busy for action="${action}". Retrying in 1.5s (attempt ${retryCount + 1}/2)...`);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        return this.executeAppsScript(action, payload, options, retryCount + 1);
+      }
+
+      if (options?.silentError || action === 'uploadImage') {
+        console.warn(`[APMERCH_DATABASE] Apps Script notice for action="${action}": ${scriptErrorMsg}`);
+      } else {
+        console.error(`[APMERCH_DATABASE] Apps Script returned failure for action="${action}":`, {
+          error: scriptErrorMsg,
+          data: parsedData
+        });
+      }
       throw new Error(`Google Apps Script Error: ${scriptErrorMsg}`);
     }
 
@@ -232,63 +380,72 @@ class GoogleSheetsApiService {
     libraryItems: TeamKAALLibraryItem[];
     emailLogs: EmailLog[];
   }> {
-    const url = this.getAppsScriptUrl();
-    if (url) {
-      this.settings.appsScriptUrl = url;
-      try {
-        const res = await this.executeAppsScript('getInitialData');
-        if (res && res.success) {
-          if (res.settings && Object.keys(res.settings).length > 0) {
-            this.settings = { ...this.settings, ...res.settings, appsScriptUrl: url };
-          }
-          if (Array.isArray(res.products) && res.products.length > 0) {
-            this.products = res.products;
-          }
-          if (Array.isArray(res.orders)) {
-            this.orders = res.orders;
-          }
-          if (Array.isArray(res.customers)) {
-            this.customers = res.customers;
-          }
-          if (Array.isArray(res.admins) && res.admins.length > 0) {
-            this.admins = res.admins;
-          }
-          if (Array.isArray(res.payments)) {
-            this.payments = res.payments;
-          }
-          if (Array.isArray(res.collections) && res.collections.length > 0) {
-            this.collections = res.collections;
-          }
-          if (Array.isArray(res.fanProjects) && res.fanProjects.length > 0) {
-            this.fanProjects = res.fanProjects;
-          }
-          if (Array.isArray(res.libraryItems) && res.libraryItems.length > 0) {
-            this.libraryItems = res.libraryItems;
-          }
-          if (Array.isArray(res.emailLogs)) {
-            this.emailLogs = res.emailLogs;
-          }
-        }
-      } catch (err: any) {
-        console.error('[APMERCH_DATABASE] syncWithSheet error fetching getInitialData:', err);
-        throw err;
-      }
-    } else {
-      console.warn('[APMERCH_DATABASE] syncWithSheet: VITE_APPS_SCRIPT_URL is not set. Default in-memory data will be used.');
+    if (this.activeSyncPromise) {
+      return this.activeSyncPromise;
     }
 
-    return {
-      settings: this.settings,
-      products: this.products,
-      orders: this.orders,
-      customers: this.customers,
-      admins: this.admins,
-      payments: this.payments,
-      collections: this.collections,
-      fanProjects: this.fanProjects,
-      libraryItems: this.libraryItems,
-      emailLogs: this.emailLogs
-    };
+    this.activeSyncPromise = (async () => {
+      const url = this.getAppsScriptUrl();
+      if (url) {
+        this.settings.appsScriptUrl = url;
+        try {
+          const res = await this.executeAppsScript('getInitialData');
+          if (res && res.success) {
+            if (res.settings && Object.keys(res.settings).length > 0) {
+              this.settings = this.sanitizeSettings({ ...this.settings, ...res.settings, appsScriptUrl: url });
+            }
+            if (Array.isArray(res.products) && res.products.length > 0) {
+              this.products = res.products;
+            }
+            if (Array.isArray(res.orders)) {
+              this.orders = res.orders;
+            }
+            if (Array.isArray(res.customers)) {
+              this.customers = res.customers;
+            }
+            if (Array.isArray(res.admins) && res.admins.length > 0) {
+              this.admins = res.admins;
+            }
+            if (Array.isArray(res.payments)) {
+              this.payments = res.payments;
+            }
+            if (Array.isArray(res.collections) && res.collections.length > 0) {
+              this.collections = res.collections;
+            }
+            if (Array.isArray(res.fanProjects) && res.fanProjects.length > 0) {
+              this.fanProjects = res.fanProjects;
+            }
+            if (Array.isArray(res.libraryItems) && res.libraryItems.length > 0) {
+              this.libraryItems = res.libraryItems;
+            }
+            if (Array.isArray(res.emailLogs)) {
+              this.emailLogs = res.emailLogs;
+            }
+          }
+        } catch (err: any) {
+          console.warn('[APMERCH_DATABASE] syncWithSheet: Unable to fetch live data from Google Sheets (' + (err?.message || err) + '). Using in-memory and persistent cache.');
+        }
+      } else {
+        console.warn('[APMERCH_DATABASE] syncWithSheet: VITE_APPS_SCRIPT_URL is not set. Default in-memory data will be used.');
+      }
+
+      return {
+        settings: this.settings,
+        products: this.products,
+        orders: this.orders,
+        customers: this.customers,
+        admins: this.admins,
+        payments: this.payments,
+        collections: this.collections,
+        fanProjects: this.fanProjects,
+        libraryItems: this.libraryItems,
+        emailLogs: this.emailLogs
+      };
+    })().finally(() => {
+      this.activeSyncPromise = null;
+    });
+
+    return this.activeSyncPromise;
   }
 
   // --- Settings ---
@@ -305,9 +462,89 @@ class GoogleSheetsApiService {
         localStorage.setItem('APMERCH_APPS_SCRIPT_URL', normalized);
       }
     }
-    this.settings = { ...this.settings, ...newSettings };
-    await this.executeAppsScript('adminUpdateSettings', { settings: this.settings });
+    this.settings = this.sanitizeSettings({ ...this.settings, ...newSettings });
+    this.persistLockedData(STORAGE_KEYS.LOCKED_SETTINGS, this.settings);
+    try {
+      await this.executeAppsScript('adminUpdateSettings', { settings: this.settings });
+    } catch (err) {
+      console.warn('[APMERCH_DATABASE] Warning syncing settings to Apps Script:', err);
+    }
     return this.settings;
+  }
+
+  // --- Image Upload to Drive APMERCH_DATAFOLDER ---
+  public getIsUploadImageSupported(): boolean | null {
+    return this.isUploadImageSupported;
+  }
+
+  public async uploadImage(
+    fileData: string, 
+    fileName: string, 
+    folder: 'Payment_Qr' | 'Logos' | 'Merchandise' | 'Collection' | 'FanProjects' | 'Homepage' | 'TeamKAAL' = 'Merchandise'
+  ): Promise<string> {
+    // If we have verified that the current Apps Script deployment doesn't support uploadImage yet,
+    // immediately return the optimized base64 image without sending a failing request.
+    if (this.isUploadImageSupported === false) {
+      return fileData;
+    }
+
+    const url = this.getAppsScriptUrl();
+    if (url && fileData && fileData.startsWith('data:image')) {
+      try {
+        const res = await this.executeAppsScript(
+          'uploadImage', 
+          { fileData, fileName, folder },
+          { silentError: true }
+        );
+        if (res && res.success && res.url) {
+          this.isUploadImageSupported = true;
+          return res.url;
+        }
+      } catch (err: any) {
+        const errMsg = String(err?.message || err);
+        if (errMsg.includes('Unknown action: uploadImage') || errMsg.includes('Unknown action')) {
+          this.isUploadImageSupported = false;
+          console.warn('[APMERCH_DATABASE] Note: Deployed Google Apps Script has an earlier version without the uploadImage action. Using optimized base64 image as safe fallback. Update and redeploy your Apps Script to enable Google Drive storage.');
+        } else {
+          console.warn(`[APMERCH_DATABASE] Drive upload to ${folder} notice, using optimized data URL:`, errMsg);
+        }
+      }
+    }
+    return fileData;
+  }
+
+  /**
+   * Ping / Test connection to Google Apps Script
+   */
+  public async testConnection(): Promise<{ 
+    success: boolean; 
+    message: string; 
+    sheetTitle?: string; 
+    supportsUploadImage?: boolean; 
+    durationMs: number 
+  }> {
+    const startTime = Date.now();
+    try {
+      const res = await this.executeAppsScript('ping', {}, { silentError: true });
+      const durationMs = Date.now() - startTime;
+      const supportsUploadImage = Array.isArray(res?.capabilities) && res.capabilities.includes('uploadImage');
+      if (supportsUploadImage) {
+        this.isUploadImageSupported = true;
+      }
+      return {
+        success: true,
+        message: res?.message || 'Apps Script Backend Connected Successfully',
+        sheetTitle: res?.sheetTitle || 'APMERCH_DATABASE',
+        supportsUploadImage: supportsUploadImage || (this.isUploadImageSupported === true),
+        durationMs
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err?.message || 'Connection test failed',
+        durationMs: Date.now() - startTime
+      };
+    }
   }
 
   // --- Products ---
@@ -323,14 +560,49 @@ class GoogleSheetsApiService {
     } else {
       this.products.unshift(product);
     }
-    await this.executeAppsScript('adminSaveProduct', { product });
+    // Lock in persistent storage immediately
+    this.persistLockedData(STORAGE_KEYS.LOCKED_PRODUCTS, this.products);
+
+    try {
+      const res = await this.executeAppsScript('adminSaveProduct', { product });
+      if (res && res.product) {
+        const updated = res.product;
+        const idx = this.products.findIndex(p => p.id === updated.id);
+        if (idx >= 0) {
+          this.products[idx] = updated;
+          this.persistLockedData(STORAGE_KEYS.LOCKED_PRODUCTS, this.products);
+        }
+        return updated;
+      }
+    } catch (err) {
+      console.warn('[APMERCH_DATABASE] Warning syncing product to sheet, kept in locked persistence:', err);
+    }
     return product;
   }
 
   public async deleteProduct(productId: string): Promise<boolean> {
     this.products = this.products.filter(p => p.id !== productId);
-    await this.executeAppsScript('adminDeleteProduct', { productId });
+    this.persistLockedData(STORAGE_KEYS.LOCKED_PRODUCTS, this.products);
+    try {
+      await this.executeAppsScript('adminDeleteProduct', { productId });
+    } catch (err) {
+      console.warn('[APMERCH_DATABASE] Warning deleting product from sheet:', err);
+    }
     return true;
+  }
+
+  public resetProductToDefault(productId: string): Product | null {
+    const defaultProd = INITIAL_PRODUCTS.find(p => p.id === productId);
+    if (defaultProd) {
+      const idx = this.products.findIndex(p => p.id === productId);
+      if (idx >= 0) {
+        this.products[idx] = { ...defaultProd };
+        this.persistLockedData(STORAGE_KEYS.LOCKED_PRODUCTS, this.products);
+        this.executeAppsScript('adminSaveProduct', { product: this.products[idx] }).catch(() => {});
+        return this.products[idx];
+      }
+    }
+    return null;
   }
 
   // --- Collections ---
@@ -346,8 +618,29 @@ class GoogleSheetsApiService {
     } else {
       this.collections.unshift(collection);
     }
-    await this.executeAppsScript('adminSaveCollection', { collection });
+    this.persistLockedData(STORAGE_KEYS.LOCKED_COLLECTIONS, this.collections);
+
+    try {
+      const res = await this.executeAppsScript('adminSaveCollection', { collection });
+      if (res && res.collection) {
+        const updated = res.collection;
+        const i = this.collections.findIndex(c => c.id === updated.id);
+        if (i >= 0) {
+          this.collections[i] = updated;
+          this.persistLockedData(STORAGE_KEYS.LOCKED_COLLECTIONS, this.collections);
+        }
+        return updated;
+      }
+    } catch (err) {
+      console.warn('[APMERCH_DATABASE] Warning syncing collection to sheet:', err);
+    }
     return collection;
+  }
+
+  public async deleteCollection(id: string): Promise<boolean> {
+    this.collections = this.collections.filter(c => c.id !== id);
+    this.persistLockedData(STORAGE_KEYS.LOCKED_COLLECTIONS, this.collections);
+    return true;
   }
 
   // --- Fan Projects ---
@@ -363,8 +656,29 @@ class GoogleSheetsApiService {
     } else {
       this.fanProjects.unshift(project);
     }
-    await this.executeAppsScript('adminSaveFanProject', { project });
+    this.persistLockedData(STORAGE_KEYS.LOCKED_FAN_PROJECTS, this.fanProjects);
+
+    try {
+      const res = await this.executeAppsScript('adminSaveFanProject', { project });
+      if (res && res.project) {
+        const updated = res.project;
+        const i = this.fanProjects.findIndex(p => p.id === updated.id);
+        if (i >= 0) {
+          this.fanProjects[i] = updated;
+          this.persistLockedData(STORAGE_KEYS.LOCKED_FAN_PROJECTS, this.fanProjects);
+        }
+        return updated;
+      }
+    } catch (err) {
+      console.warn('[APMERCH_DATABASE] Warning syncing fan project to sheet:', err);
+    }
     return project;
+  }
+
+  public async deleteFanProject(id: string): Promise<boolean> {
+    this.fanProjects = this.fanProjects.filter(p => p.id !== id);
+    this.persistLockedData(STORAGE_KEYS.LOCKED_FAN_PROJECTS, this.fanProjects);
+    return true;
   }
 
   // --- Team KAAL Library ---
@@ -380,8 +694,44 @@ class GoogleSheetsApiService {
     } else {
       this.libraryItems.unshift(item);
     }
-    await this.executeAppsScript('adminSaveLibraryItem', { item });
+    this.persistLockedData(STORAGE_KEYS.LOCKED_LIBRARY_ITEMS, this.libraryItems);
+
+    try {
+      const res = await this.executeAppsScript('adminSaveLibraryItem', { item });
+      if (res && res.item) {
+        const updated = res.item;
+        const i = this.libraryItems.findIndex(l => l.id === updated.id);
+        if (i >= 0) {
+          this.libraryItems[i] = updated;
+          this.persistLockedData(STORAGE_KEYS.LOCKED_LIBRARY_ITEMS, this.libraryItems);
+        }
+        return updated;
+      }
+    } catch (err) {
+      console.warn('[APMERCH_DATABASE] Warning syncing library item to sheet:', err);
+    }
     return item;
+  }
+
+  public async deleteLibraryItem(id: string): Promise<boolean> {
+    this.libraryItems = this.libraryItems.filter(l => l.id !== id);
+    this.persistLockedData(STORAGE_KEYS.LOCKED_LIBRARY_ITEMS, this.libraryItems);
+    return true;
+  }
+
+  public resetAllToDefault(): void {
+    this.products = [...INITIAL_PRODUCTS];
+    this.collections = [...INITIAL_COLLECTIONS];
+    this.fanProjects = [...INITIAL_FAN_PROJECTS];
+    this.libraryItems = [...INITIAL_LIBRARY_ITEMS];
+    this.settings = { ...INITIAL_SETTINGS };
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEYS.LOCKED_PRODUCTS);
+      localStorage.removeItem(STORAGE_KEYS.LOCKED_COLLECTIONS);
+      localStorage.removeItem(STORAGE_KEYS.LOCKED_FAN_PROJECTS);
+      localStorage.removeItem(STORAGE_KEYS.LOCKED_LIBRARY_ITEMS);
+      localStorage.removeItem(STORAGE_KEYS.LOCKED_SETTINGS);
+    }
   }
 
   // --- Customers ---

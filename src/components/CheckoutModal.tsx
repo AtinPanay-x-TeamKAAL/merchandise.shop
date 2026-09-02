@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   X, 
@@ -46,9 +46,21 @@ export const CheckoutModal: React.FC = () => {
   const [notes, setNotes] = useState('');
 
   // Dynamic Payment Methods list from settings (active only for customers)
-  const availablePaymentMethods: PaymentMethodConfig[] = (settings.paymentMethods && settings.paymentMethods.length > 0)
-    ? settings.paymentMethods.filter(pm => pm.active)
-    : INITIAL_PAYMENT_METHODS.filter(pm => pm.active);
+  const availablePaymentMethods: PaymentMethodConfig[] = useMemo(() => {
+    let list: any = settings?.paymentMethods;
+    if (typeof list === 'string') {
+      try {
+        list = JSON.parse(list);
+      } catch {
+        list = null;
+      }
+    }
+    if (!Array.isArray(list) || list.length === 0) {
+      list = INITIAL_PAYMENT_METHODS;
+    }
+    const filtered = list.filter((pm: any) => pm && pm.active);
+    return filtered.length > 0 ? filtered : INITIAL_PAYMENT_METHODS.filter(pm => pm.active);
+  }, [settings?.paymentMethods]);
 
   // Payment Selection
   const [selectedMethodId, setSelectedMethodId] = useState<string>(
