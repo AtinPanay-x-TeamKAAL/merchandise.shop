@@ -215,38 +215,104 @@ class GoogleSheetsApiService {
       throw new Error(errMessage);
     }
 
+    const READ_ACTIONS = [
+      'getInitialData',
+      'ping',
+      'verifyCustomer',
+      'loginCustomer',
+      'getCustomerOrders',
+      'getLatestOrderIds',
+      'trackOrder',
+      'checkPendingOrder'
+    ];
+    const isReadAction = READ_ACTIONS.includes(action);
+
     const postPayload = {
       action,
       ...payload
     };
     const bodyString = JSON.stringify(postPayload);
 
-    console.log(`[APMERCH_DATABASE] executeAppsScript: Sending POST request for action="${action}" to ${url}`, {
-      action,
-      payloadPreview: bodyString && bodyString.length > 300 ? bodyString.substring(0, 300) + '...' : (bodyString || '')
-    });
+    const buildGetUrl = () => {
+      const separator = url.includes('?') ? '&' : '?';
+      let reqUrl = `${url}${separator}action=${encodeURIComponent(action)}`;
+      if (payload && Object.keys(payload).length > 0) {
+        reqUrl += `&data=${encodeURIComponent(JSON.stringify(payload))}`;
+      }
+      return reqUrl;
+    };
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: bodyString,
-        redirect: 'follow'
+    let response: Response | null = null;
+    let lastFetchErr: any = null;
+
+    // Strategy 1: For read-only actions, prefer GET to prevent 302 POST redirect CORS issues in browsers
+    if (isReadAction) {
+      const getUrl = buildGetUrl();
+      console.log(`[APMERCH_DATABASE] executeAppsScript: Sending GET request for action="${action}" to ${getUrl}`);
+      try {
+        response = await fetch(getUrl, {
+          method: 'GET',
+          redirect: 'follow'
+        });
+      } catch (getErr: any) {
+        lastFetchErr = getErr;
+        console.warn(`[APMERCH_DATABASE] GET attempt failed for action="${action}". Attempting POST fallback...`);
+      }
+    }
+
+    // Strategy 2: If not read action, or if GET attempt failed, send standard POST request
+    if (!response) {
+      console.log(`[APMERCH_DATABASE] executeAppsScript: Sending POST request for action="${action}" to ${url}`, {
+        action,
+        payloadPreview: bodyString && bodyString.length > 300 ? bodyString.substring(0, 300) + '...' : (bodyString || '')
       });
-    } catch (fetchErr: any) {
-      const fetchErrMsg = `[APMERCH_DATABASE] Fetch error for action="${action}": ${fetchErr?.message || fetchErr}`;
-      if (options?.silentError || action === 'uploadImage') {
+
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: bodyString,
+          redirect: 'follow'
+        });
+      } catch (postErr: any) {
+        lastFetchErr = postErr;
+
+        // If POST failed with network error and payload is small, attempt GET as last resort
+        if (!isReadAction && bodyString.length < 1500) {
+          try {
+            console.warn(`[APMERCH_DATABASE] POST failed for action="${action}". Attempting GET fallback...`);
+            const fallbackGetUrl = buildGetUrl();
+            response = await fetch(fallbackGetUrl, {
+              method: 'GET',
+              redirect: 'follow'
+            });
+          } catch (fallbackErr: any) {
+            lastFetchErr = fallbackErr;
+          }
+        }
+      }
+    }
+
+    // If both failed and we can retry, wait and retry once
+    if (!response) {
+      if (retryCount < 1) {
+        console.warn(`[APMERCH_DATABASE] Network request failed for action="${action}". Retrying in 1s (attempt ${retryCount + 1}/1)...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return this.executeAppsScript(action, payload, options, retryCount + 1);
+      }
+
+      const fetchErrMsg = `[APMERCH_DATABASE] Fetch error for action="${action}": ${lastFetchErr?.message || lastFetchErr || 'Network error'}`;
+      if (options?.silentError || action === 'uploadImage' || isReadAction) {
         console.warn(fetchErrMsg);
       } else {
         console.error(fetchErrMsg, {
           action,
           url,
-          error: fetchErr
+          error: lastFetchErr
         });
       }
       throw new Error(
-        `Failed to reach Google Apps Script (${action}): ${fetchErr?.message || 'Network/CORS error'}. ` +
+        `Failed to reach Google Apps Script (${action}): ${lastFetchErr?.message || 'Network/CORS error'}. ` +
         `Please verify that your Google Apps Script Web App is deployed with "Who has access: Anyone" and "Execute as: Me".`
       );
     }
