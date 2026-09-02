@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { Sparkles, Heart, ShieldCheck, Calendar, MapPin, Lock } from 'lucide-react';
+import { Sparkles, Heart, ShieldCheck, Calendar, MapPin, Lock, Download } from 'lucide-react';
 import { PanayEmblem, KaalLogo } from './Logos';
 
 export const Footer: React.FC = () => {
@@ -100,6 +100,16 @@ export const Footer: React.FC = () => {
                 >
                   Track Order Status
                 </button>
+              </li>
+              <li className="pt-1">
+                <a
+                  href="/atin-panay-hub.zip"
+                  download="atin-panay-hub.zip"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 font-bold transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Download for VS Code (.ZIP)</span>
+                </a>
               </li>
             </ul>
           </div>

@@ -42,46 +42,121 @@ import {
 class GoogleSheetsApiService {
   private settings: AppSettings = INITIAL_SETTINGS;
   private products: Product[] = INITIAL_PRODUCTS;
-  private orders: Order[] = INITIAL_ORDERS;
-  private customers: Customer[] = INITIAL_CUSTOMERS;
+  private orders: Order[] = [];
+  private customers: Customer[] = [];
   private admins: AdminUser[] = INITIAL_ADMINS;
-  private payments: PaymentRecord[] = INITIAL_PAYMENTS;
+  private payments: PaymentRecord[] = [];
   private collections: CollectionItem[] = INITIAL_COLLECTIONS;
   private fanProjects: FanProject[] = INITIAL_FAN_PROJECTS;
   private libraryItems: TeamKAALLibraryItem[] = INITIAL_LIBRARY_ITEMS;
-  private emailLogs: EmailLog[] = INITIAL_EMAIL_LOGS;
+  private emailLogs: EmailLog[] = [];
 
   constructor() {
-    // Initial schema definition matches APMERCH_DATABASE Google Sheet structure
+    const storedGasUrl = typeof window !== 'undefined' ? localStorage.getItem('APMERCH_APPS_SCRIPT_URL') || '' : '';
+    const envGasUrl = import.meta.env.VITE_APPS_SCRIPT_URL || '';
+    this.settings.appsScriptUrl = this.normalizeUrl(this.settings.appsScriptUrl || storedGasUrl || envGasUrl);
+    if (this.settings.appsScriptUrl) {
+      this.syncWithSheet().catch(err => {
+        console.warn('[APMERCH_DATABASE] Automatic startup sync error:', err);
+      });
+    }
+  }
+
+  public normalizeUrl(rawUrl: string): string {
+    let url = (rawUrl || '').trim();
+    if (!url) return '';
+    url = url.replace(/^["']|["']$/g, '');
+    if (url.includes('/macros/s/') && !url.includes('/exec')) {
+      url = url.replace(/\/(edit|dev)(\?.*)?$/, '/exec');
+    }
+    return url;
+  }
+
+  public getAppsScriptUrl(): string {
+    if (this.settings.appsScriptUrl) {
+      return this.normalizeUrl(this.settings.appsScriptUrl);
+    }
+    const storedGasUrl = typeof window !== 'undefined' ? localStorage.getItem('APMERCH_APPS_SCRIPT_URL') || '' : '';
+    if (storedGasUrl) {
+      this.settings.appsScriptUrl = this.normalizeUrl(storedGasUrl);
+      return this.settings.appsScriptUrl;
+    }
+    const envGasUrl = import.meta.env.VITE_APPS_SCRIPT_URL || '';
+    if (envGasUrl) {
+      this.settings.appsScriptUrl = this.normalizeUrl(envGasUrl);
+      return this.settings.appsScriptUrl;
+    }
+    return '';
   }
 
   // --- Remote Apps Script API Client ---
-  private async executeAppsScript(action: string, payload: any = {}): Promise<any> {
-    if (!this.settings.appsScriptUrl) {
+  public async executeAppsScript(action: string, payload: any = {}): Promise<any> {
+    const url = this.getAppsScriptUrl();
+    if (!url) {
+      console.warn(`[APMERCH_DATABASE] executeAppsScript: No Apps Script URL configured for action "${action}".`);
       return null;
     }
 
+    const postPayload = {
+      action,
+      ...payload
+    };
+
+    // 1. Primary: POST request with text/plain to avoid preflight (CORS simple request)
     try {
-      const response = await fetch(this.settings.appsScriptUrl, {
+      const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action, ...payload })
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(postPayload),
+        redirect: 'follow'
       });
-      const data = await response.json();
-      return data;
-    } catch (error) {
-  console.error(
-    `[APMERCH_DATABASE] Remote sync error on action "${action}":`,
-    error
-  );
 
-  alert(
-    `Apps Script Error (${action}): ` +
-    (error instanceof Error ? error.message : String(error))
-  );
+      const text = await response.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch (jsonErr) {
+        console.warn(`[APMERCH_DATABASE] POST non-JSON response for action "${action}":`, text);
+      }
 
-  return null;
-}
+      if (data) {
+        return data;
+      }
+    } catch (postError) {
+      console.warn(`[APMERCH_DATABASE] POST failed on action "${action}", attempting GET fallback:`, postError);
+    }
+
+    // 2. Secondary fallback: GET request (simple request, bypasses any POST redirect/CORS issues)
+    try {
+      const getUrl = new URL(url);
+      getUrl.searchParams.set('action', action);
+      getUrl.searchParams.set('data', JSON.stringify(payload));
+      if (payload.customer) {
+        getUrl.searchParams.set('customer', typeof payload.customer === 'string' ? payload.customer : JSON.stringify(payload.customer));
+      }
+      if (payload.email) {
+        getUrl.searchParams.set('email', payload.email);
+      }
+
+      const getRes = await fetch(getUrl.toString(), {
+        method: 'GET',
+        redirect: 'follow'
+      });
+
+      const getText = await getRes.text();
+      try {
+        const getData = JSON.parse(getText);
+        if (getData) {
+          return getData;
+        }
+      } catch (e) {
+        console.warn(`[APMERCH_DATABASE] GET fallback non-JSON response for action "${action}":`, getText);
+      }
+    } catch (getError) {
+      console.warn(`[APMERCH_DATABASE] Remote sync error on action "${action}":`, getError);
+    }
+
+    return null;
   }
 
   /**
@@ -122,11 +197,13 @@ class GoogleSheetsApiService {
     libraryItems: TeamKAALLibraryItem[];
     emailLogs: EmailLog[];
   }> {
-    if (this.settings.appsScriptUrl) {
+    const url = this.settings.appsScriptUrl || import.meta.env.VITE_APPS_SCRIPT_URL || '';
+    if (url) {
+      this.settings.appsScriptUrl = url;
       const res = await this.executeAppsScript('getInitialData');
       if (res && res.success) {
         if (res.settings && Object.keys(res.settings).length > 0) {
-          this.settings = { ...this.settings, ...res.settings };
+          this.settings = { ...this.settings, ...res.settings, appsScriptUrl: url };
         }
         if (Array.isArray(res.products) && res.products.length > 0) {
           this.products = res.products;
@@ -137,7 +214,7 @@ class GoogleSheetsApiService {
         if (Array.isArray(res.customers)) {
           this.customers = res.customers;
         }
-        if (Array.isArray(res.admins)) {
+        if (Array.isArray(res.admins) && res.admins.length > 0) {
           this.admins = res.admins;
         }
         if (Array.isArray(res.payments)) {
@@ -179,6 +256,13 @@ class GoogleSheetsApiService {
   }
 
   public async updateSettings(newSettings: Partial<AppSettings>): Promise<AppSettings> {
+    if (newSettings.appsScriptUrl !== undefined) {
+      const normalized = this.normalizeUrl(newSettings.appsScriptUrl);
+      newSettings.appsScriptUrl = normalized;
+      if (typeof window !== 'undefined' && normalized) {
+        localStorage.setItem('APMERCH_APPS_SCRIPT_URL', normalized);
+      }
+    }
     this.settings = { ...this.settings, ...newSettings };
     await this.executeAppsScript('adminUpdateSettings', { settings: this.settings });
     return this.settings;
@@ -260,7 +344,12 @@ class GoogleSheetsApiService {
 
   // --- Customers ---
 
-  public async registerCustomer(customerData: Omit<Customer, 'id' | 'createdAt'>): Promise<{ customer: Customer; code: string }> {
+  public async registerCustomer(customerData: Omit<Customer, 'id' | 'createdAt'> & { password?: string }): Promise<{ customer: Customer; code: string }> {
+    const url = this.getAppsScriptUrl();
+    if (!url) {
+      throw new Error('Google Sheets Apps Script URL is not configured (VITE_APPS_SCRIPT_URL). Customer accounts cannot be stored only in memory.');
+    }
+
     const emailClean = customerData.email.trim().toLowerCase();
     const existing = this.customers.find(c => c.email.trim().toLowerCase() === emailClean);
     if (existing) {
@@ -268,65 +357,117 @@ class GoogleSheetsApiService {
     }
 
     const verificationCode = String(Math.floor(100000 + Math.random() * 900000));
-    const newCustomer: Customer = {
+    const now = new Date().toISOString();
+    const newCustomer: Customer & { password?: string } = {
       ...customerData,
       id: `CUST-${Date.now().toString(36).toUpperCase()}`,
       isVerified: false,
       verificationCode,
-      createdAt: new Date().toISOString(),
-      lastLoginAt: new Date().toISOString()
+      createdAt: now,
+      lastLoginAt: now
     };
 
-    this.customers.push(newCustomer);
+    const res = await this.executeAppsScript('registerCustomer', {
+      customer: newCustomer,
+      ...newCustomer
+    });
+
+    console.log('REGISTER RESPONSE:', res);
+
+    if (!res || !res.success) {
+      const errMsg = res?.error || res?.message || 'Failed to register customer in Google Sheets. Please verify your Apps Script connection.';
+      throw new Error(errMsg);
+    }
+
+    const savedCustomer: Customer = res.customer || {
+      id: newCustomer.id,
+      fullName: newCustomer.fullName,
+      email: newCustomer.email,
+      mobileNumber: newCustomer.mobileNumber,
+      facebookName: newCustomer.facebookName,
+      isVerified: false,
+      verificationCode: res.code || verificationCode,
+      createdAt: newCustomer.createdAt,
+      lastLoginAt: newCustomer.lastLoginAt
+    };
+
+    const idx = this.customers.findIndex(c => c.email.trim().toLowerCase() === emailClean);
+    if (idx >= 0) {
+      this.customers[idx] = savedCustomer;
+    } else {
+      this.customers.push(savedCustomer);
+    }
+
+    const finalCode = res.code || verificationCode;
 
     // Send and log verification email
     this.logEmail({
-      toEmail: newCustomer.email,
-      recipientName: newCustomer.fullName,
-      subject: `Account Verification Code: ${verificationCode} - A'TIN Panay Merch Portal`,
+      toEmail: savedCustomer.email,
+      recipientName: savedCustomer.fullName,
+      subject: `Account Verification Code: ${finalCode} - A'TIN Panay Merch Portal`,
       templateType: 'Registration Verification',
       status: 'Sent',
-      previewBody: `Your 6-digit verification code is ${verificationCode}. Enter this code in the portal to verify your account.`
+      previewBody: `Your 6-digit verification code is ${finalCode}. Enter this code in the portal to verify your account.`
     });
 
-    const res = await this.executeAppsScript(
-  'registerCustomer',
-  { customer: newCustomer }
-);
-
-console.log('REGISTER RESPONSE:', res);
+    return { customer: savedCustomer, code: finalCode };
   }
 
   public async verifyCustomerEmail(email: string, code: string): Promise<Customer> {
     const emailClean = email.trim().toLowerCase();
-    const cust = this.customers.find(c => c.email.trim().toLowerCase() === emailClean);
-    if (!cust) {
-      throw new Error('Customer account not found in APMERCH_DATABASE.');
-    }
-    if (cust.isVerified) {
-      return cust;
-    }
-    if (cust.verificationCode !== code && code !== '888888') {
-      throw new Error('Invalid verification code. Please check your email or request a new code.');
+    const url = this.getAppsScriptUrl();
+    if (!url) {
+      throw new Error('Google Sheets Apps Script URL is not configured (VITE_APPS_SCRIPT_URL).');
     }
 
-    cust.isVerified = true;
-    cust.lastLoginAt = new Date().toISOString();
+    const res = await this.executeAppsScript('verifyCustomer', { email: emailClean, code });
+    if (!res || !res.success) {
+      throw new Error(res?.error || res?.message || 'Invalid verification code or verification failed in Google Sheets.');
+    }
 
-    await this.executeAppsScript('verifyCustomer', { email, code });
+    let cust = this.customers.find(c => c.email.trim().toLowerCase() === emailClean);
+    if (cust) {
+      cust.isVerified = true;
+      cust.lastLoginAt = new Date().toISOString();
+    } else if (res.customer) {
+      cust = res.customer;
+      this.customers.push(cust);
+    } else {
+      cust = {
+        id: `CUST-${Date.now().toString(36).toUpperCase()}`,
+        fullName: 'Customer',
+        email: emailClean,
+        mobileNumber: '',
+        isVerified: true,
+        verificationCode: code,
+        createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString()
+      };
+      this.customers.push(cust);
+    }
+
     return cust;
   }
 
   public async loginCustomer(email: string): Promise<Customer> {
     const emailClean = email.trim().toLowerCase();
-    const cust = this.customers.find(c => c.email.trim().toLowerCase() === emailClean);
-    if (!cust) {
-      throw new Error('No registered account found with this email in APMERCH_DATABASE. Please register.');
+    const url = this.getAppsScriptUrl();
+    if (!url) {
+      throw new Error('Google Sheets Apps Script URL is not configured (VITE_APPS_SCRIPT_URL). Customer login requires a connected Google Sheet.');
     }
-    cust.lastLoginAt = new Date().toISOString();
 
-    await this.executeAppsScript('loginCustomer', { email });
-    return cust;
+    const res = await this.executeAppsScript('loginCustomer', { email: emailClean });
+    if (!res || !res.success || !res.customer) {
+      throw new Error(res?.error || res?.message || 'No customer account found with this email in Google Sheets. Please register.');
+    }
+
+    const existingIdx = this.customers.findIndex(c => c.email.trim().toLowerCase() === emailClean);
+    if (existingIdx >= 0) {
+      this.customers[existingIdx] = res.customer;
+    } else {
+      this.customers.push(res.customer);
+    }
+    return res.customer;
   }
 
   public async getCustomers(): Promise<Customer[]> {
@@ -336,58 +477,21 @@ console.log('REGISTER RESPONSE:', res);
   // --- Orders & Server-Side Atomic Sequential ID Generation ---
 
   public async createOrder(orderInput: Omit<Order, 'id' | 'orderNumber' | 'confirmationNumber' | 'createdAt' | 'updatedAt'>): Promise<Order> {
-    const now = new Date().toISOString();
-
-    // 1. If connected to Google Apps Script Web App, trigger server-side atomic creation
-    // Google Apps Script derives sequential OrderNumber & ConfirmationNumber under LockService
-    if (this.settings.appsScriptUrl) {
-      const remoteRes = await this.executeAppsScript('createOrder', { orderData: orderInput });
-      if (remoteRes && remoteRes.success && remoteRes.order) {
-        const createdOrder: Order = remoteRes.order;
-        
-        // Sync local cache with Google Sheet return
-        const existingIndex = this.orders.findIndex(o => o.orderNumber === createdOrder.orderNumber);
-        if (existingIndex >= 0) {
-          this.orders[existingIndex] = createdOrder;
-        } else {
-          this.orders.unshift(createdOrder);
-        }
-
-        if (createdOrder.paymentProofUrl || createdOrder.paymentReferenceNumber) {
-          const newPayment: PaymentRecord = {
-            id: `PAY-${Date.now().toString(36).toUpperCase()}`,
-            orderNumber: createdOrder.orderNumber,
-            confirmationNumber: createdOrder.confirmationNumber,
-            customerEmail: createdOrder.customerEmail,
-            customerName: createdOrder.customerName,
-            amount: createdOrder.totalAmount,
-            method: createdOrder.paymentMethod,
-            senderName: createdOrder.paymentSenderName || createdOrder.customerName,
-            senderNumber: createdOrder.paymentSenderNumber || createdOrder.customerMobile,
-            referenceNumber: createdOrder.paymentReferenceNumber || 'Pending Ref',
-            proofUrl: createdOrder.paymentProofUrl || '',
-            status: createdOrder.paymentStatus,
-            createdAt: now,
-            notes: 'Submitted during checkout'
-          };
-          this.payments.unshift(newPayment);
-        }
-
-        return createdOrder;
-      }
+    const url = this.getAppsScriptUrl();
+    if (!url) {
+      throw new Error('Google Sheets Apps Script URL is not configured (VITE_APPS_SCRIPT_URL). Orders cannot be stored only in memory.');
     }
 
-    // 2. Direct sequential scan of Orders sheet records (prevents random numbers or counters)
-    const ids = this.generateSequentialOrderIds();
-    const createdOrder: Order = {
-      ...orderInput,
-      id: `ORD-${Date.now().toString(36).toUpperCase()}`,
-      orderNumber: ids.orderNumber,
-      confirmationNumber: ids.confirmationNumber,
-      createdAt: now,
-      updatedAt: now
-    };
+    // Server-side atomic creation in Google Sheets under LockService
+    const remoteRes = await this.executeAppsScript('createOrder', { orderData: orderInput });
+    if (!remoteRes || !remoteRes.success || !remoteRes.order) {
+      throw new Error(remoteRes?.error || remoteRes?.message || 'Failed to submit order to Google Sheets. Orders cannot be stored only in memory.');
+    }
 
+    const createdOrder: Order = remoteRes.order;
+    const now = new Date().toISOString();
+
+    // Cache confirmed Google Sheets order
     const existingIndex = this.orders.findIndex(o => o.orderNumber === createdOrder.orderNumber);
     if (existingIndex >= 0) {
       this.orders[existingIndex] = createdOrder;
@@ -395,7 +499,6 @@ console.log('REGISTER RESPONSE:', res);
       this.orders.unshift(createdOrder);
     }
 
-    // Log payment record if receipt or reference provided
     if (createdOrder.paymentProofUrl || createdOrder.paymentReferenceNumber) {
       const newPayment: PaymentRecord = {
         id: `PAY-${Date.now().toString(36).toUpperCase()}`,
@@ -437,6 +540,11 @@ console.log('REGISTER RESPONSE:', res);
     senderName: string, 
     senderNumber: string
   ): Promise<Order> {
+    const url = this.getAppsScriptUrl();
+    if (!url) {
+      throw new Error('Google Sheets Apps Script URL is not configured (VITE_APPS_SCRIPT_URL). Payment proof cannot be stored only in memory.');
+    }
+
     const clean = orderNumber.trim().toUpperCase();
     const order = this.orders.find(o => 
       o.orderNumber.toUpperCase() === clean || 
@@ -444,6 +552,20 @@ console.log('REGISTER RESPONSE:', res);
     );
     if (!order) {
       throw new Error(`Order ${orderNumber} not found in APMERCH_DATABASE.`);
+    }
+
+    const res = await this.executeAppsScript('submitPaymentProof', { 
+      paymentData: { 
+        orderNumber: order.orderNumber, 
+        proofUrl, 
+        referenceNumber, 
+        senderName, 
+        senderNumber 
+      } 
+    });
+
+    if (!res || !res.success) {
+      throw new Error(res?.error || res?.message || 'Failed to submit payment proof to Google Sheets.');
     }
 
     const now = new Date().toISOString();
@@ -455,7 +577,7 @@ console.log('REGISTER RESPONSE:', res);
     order.status = 'Under Verification';
     order.updatedAt = now;
 
-    // Update or insert payment record in Payments sheet data
+    // Cache updated payment record
     let payRecord = this.payments.find(p => p.orderNumber.toUpperCase() === order.orderNumber.toUpperCase());
     if (payRecord) {
       payRecord.proofUrl = proofUrl;
@@ -482,16 +604,6 @@ console.log('REGISTER RESPONSE:', res);
         notes: 'Proof uploaded via customer portal'
       });
     }
-
-    await this.executeAppsScript('submitPaymentProof', { 
-      paymentData: { 
-        orderNumber: order.orderNumber, 
-        proofUrl, 
-        referenceNumber, 
-        senderName, 
-        senderNumber 
-      } 
-    });
 
     return order;
   }
@@ -533,13 +645,23 @@ console.log('REGISTER RESPONSE:', res);
   }
 
   public async addAdminUser(admin: Omit<AdminUser, 'id' | 'createdAt'>): Promise<AdminUser> {
+    const url = this.getAppsScriptUrl();
+    if (!url) {
+      throw new Error('Google Sheets Apps Script URL is not configured.');
+    }
+
     const newAdmin: AdminUser = {
       ...admin,
       id: `ADM-${Date.now().toString(36).toUpperCase()}`,
       createdAt: new Date().toISOString()
     };
+
+    const res = await this.executeAppsScript('adminAddAdminUser', { admin: newAdmin });
+    if (!res || !res.success) {
+      throw new Error(res?.error || res?.message || 'Failed to save admin user to Google Sheets.');
+    }
+
     this.admins.push(newAdmin);
-    await this.executeAppsScript('adminAddAdminUser', { admin: newAdmin });
     return newAdmin;
   }
 
@@ -551,10 +673,28 @@ console.log('REGISTER RESPONSE:', res);
     notes?: string,
     sendEmailNotification: boolean = true
   ): Promise<Order> {
+    const url = this.getAppsScriptUrl();
+    if (!url) {
+      throw new Error('Google Sheets Apps Script URL is not configured (VITE_APPS_SCRIPT_URL). Order status cannot be updated without a connected Google Sheet.');
+    }
+
     const clean = orderNumber.trim().toUpperCase();
     const order = this.orders.find(o => o.orderNumber.toUpperCase() === clean);
     if (!order) {
       throw new Error(`Order ${orderNumber} not found in APMERCH_DATABASE.`);
+    }
+
+    const res = await this.executeAppsScript('adminUpdateOrderStatus', {
+      orderNumber,
+      status: newStatus,
+      paymentStatus: newPaymentStatus,
+      verifiedBy,
+      notes,
+      sendEmail: sendEmailNotification
+    });
+
+    if (!res || !res.success) {
+      throw new Error(res?.error || res?.message || 'Failed to update order status in Google Sheets.');
     }
 
     const now = new Date().toISOString();
@@ -600,15 +740,6 @@ console.log('REGISTER RESPONSE:', res);
         previewBody: `Status for order ${order.orderNumber} is now: ${newStatus}. Verified by: ${verifiedBy}.`
       });
     }
-
-    await this.executeAppsScript('adminUpdateOrderStatus', {
-      orderNumber,
-      status: newStatus,
-      paymentStatus: newPaymentStatus,
-      verifiedBy,
-      notes,
-      sendEmail: sendEmailNotification
-    });
 
     return order;
   }
@@ -660,16 +791,23 @@ console.log('REGISTER RESPONSE:', res);
   }
 
   public resetToFactoryDefaults() {
-    this.settings = INITIAL_SETTINGS;
+    this.settings = {
+      ...INITIAL_SETTINGS,
+      appsScriptUrl: import.meta.env.VITE_APPS_SCRIPT_URL || ''
+    };
     this.products = INITIAL_PRODUCTS;
-    this.orders = INITIAL_ORDERS;
-    this.customers = INITIAL_CUSTOMERS;
+    this.orders = [];
+    this.customers = [];
     this.admins = INITIAL_ADMINS;
-    this.payments = INITIAL_PAYMENTS;
+    this.payments = [];
     this.collections = INITIAL_COLLECTIONS;
     this.fanProjects = INITIAL_FAN_PROJECTS;
     this.libraryItems = INITIAL_LIBRARY_ITEMS;
-    this.emailLogs = INITIAL_EMAIL_LOGS;
+    this.emailLogs = [];
+
+    if (this.settings.appsScriptUrl) {
+      this.syncWithSheet().catch(err => console.warn('[APMERCH_DATABASE] Reset sync error:', err));
+    }
   }
 }
 

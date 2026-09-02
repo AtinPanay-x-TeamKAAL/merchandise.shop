@@ -60,6 +60,25 @@ function handleRequest(e) {
       params = e.parameter;
     }
 
+    if (typeof params === 'string') {
+      try {
+        params = JSON.parse(params);
+      } catch (ex) {}
+    }
+
+    if (params && params.data) {
+      try {
+        const decoded = typeof params.data === 'string' ? JSON.parse(params.data) : params.data;
+        params = Object.assign({}, params, decoded);
+      } catch (ex) {}
+    }
+
+    if (params && params.customer && typeof params.customer === 'string') {
+      try {
+        params.customer = JSON.parse(params.customer);
+      } catch (ex) {}
+    }
+
     const action = params.action || 'ping';
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ensureTabsExist(ss);
@@ -80,9 +99,11 @@ function handleRequest(e) {
         result = getInitialData(ss);
         break;
 
-      case 'registerCustomer':
-        result = registerCustomer(ss, params.customer);
+      case 'registerCustomer': {
+        const custData = params.customer || params;
+        result = registerCustomer(ss, custData);
         break;
+      }
 
       case 'verifyCustomer':
         result = verifyCustomer(ss, params.email, params.code);
@@ -733,30 +754,59 @@ function readEmailLogsSheet(ss) {
  * Register Customer in Customers sheet
  */
 function registerCustomer(ss, customerData) {
+  if (!customerData) {
+    return { success: false, error: 'No customer data provided for registration.' };
+  }
+  if (typeof customerData === 'string') {
+    try {
+      customerData = JSON.parse(customerData);
+    } catch (e) {
+      return { success: false, error: 'Failed to parse customer data: ' + e.toString() };
+    }
+  }
+
   const sheet = ss.getSheetByName('Customers');
+  if (!sheet) {
+    return { success: false, error: 'Customers tab not found in APMERCH_DATABASE spreadsheet.' };
+  }
+
   const rows = sheet.getDataRange().getValues();
   const emailClean = (customerData.email || '').trim().toLowerCase();
+  if (!emailClean) {
+    return { success: false, error: 'Customer email is required for registration.' };
+  }
 
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][2]).toLowerCase() === emailClean) {
+    if (String(rows[i][2] || '').trim().toLowerCase() === emailClean) {
       return { success: false, error: 'An account with this email already exists in APMERCH_DATABASE.' };
     }
   }
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const code = String(customerData.verificationCode || Math.floor(100000 + Math.random() * 900000));
   const now = new Date().toISOString();
-  const custId = 'CUST-' + Utilities.getUuid().substring(0, 8).toUpperCase();
+  const custId = customerData.id || ('CUST-' + Utilities.getUuid().substring(0, 8).toUpperCase());
+
+  let passwordVal = '';
+  if (customerData.password) {
+    try {
+      passwordVal = Utilities.base64Encode(customerData.password, Utilities.Charset.UTF_8);
+    } catch (e) {
+      passwordVal = String(customerData.password);
+    }
+  } else if (customerData.passwordHash) {
+    passwordVal = String(customerData.passwordHash);
+  }
 
   sheet.appendRow([
     custId,
-    customerData.fullName,
-    customerData.email,
-    customerData.password ? Utilities.base64Encode(customerData.password) : '',
+    customerData.fullName || '',
+    customerData.email || '',
+    passwordVal,
     customerData.mobileNumber || '',
     customerData.facebookName || '',
-    false,
+    customerData.isVerified === true,
     code,
-    now,
+    customerData.createdAt || now,
     now
   ]);
 
@@ -764,20 +814,20 @@ function registerCustomer(ss, customerData) {
 
   const newCust = {
     id: custId,
-    fullName: customerData.fullName,
-    email: customerData.email,
-    mobileNumber: customerData.mobileNumber,
-    facebookName: customerData.facebookName,
-    isVerified: false,
+    fullName: customerData.fullName || '',
+    email: customerData.email || '',
+    mobileNumber: customerData.mobileNumber || '',
+    facebookName: customerData.facebookName || '',
+    isVerified: customerData.isVerified === true,
     verificationCode: code,
-    createdAt: now,
+    createdAt: customerData.createdAt || now,
     lastLoginAt: now
   };
 
   try {
     sendTemplateEmail(
       customerData.email,
-      customerData.fullName,
+      customerData.fullName || 'Valued Fan',
       "Account Verification Code: " + code + " - A'TIN Panay Merch Portal",
       'Registration Verification',
       '',

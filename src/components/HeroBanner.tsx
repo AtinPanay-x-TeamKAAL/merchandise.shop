@@ -65,8 +65,8 @@ export const HeroBanner: React.FC = () => {
             </div>
 
             {/* Main Heading: Large Typography */}
-            <div className="space-y-2">
-              <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black text-slate-900 tracking-tight leading-[1.08]">
+            <div className="space-y-2 max-w-full overflow-hidden">
+              <h1 className="text-3xl sm:text-5xl lg:text-6xl xl:text-7xl font-black text-slate-900 tracking-tight leading-[1.1] break-words">
                 A'TIN Panay{' '}
                 <span className="block bg-gradient-to-r from-purple-700 via-indigo-600 to-pink-600 bg-clip-text text-transparent">
                   Community Hub

@@ -168,9 +168,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(null);
   
-  const [allOrders, setAllOrders] = useState<Order[]>(INITIAL_ORDERS);
-  const [allPayments, setAllPayments] = useState<PaymentRecord[]>(INITIAL_PAYMENTS);
-  const [allCustomers, setAllCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [allPayments, setAllPayments] = useState<PaymentRecord[]>([]);
+  const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [allAdmins, setAllAdmins] = useState<AdminUser[]>(INITIAL_ADMINS);
   const [emailLogs, setEmailLogs] = useState<EmailLog[]>(INITIAL_EMAIL_LOGS);
 

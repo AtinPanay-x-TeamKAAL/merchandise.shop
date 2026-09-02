@@ -57,7 +57,7 @@ export const INITIAL_PAYMENT_METHODS: PaymentMethodConfig[] = [
 
 export const INITIAL_SETTINGS: AppSettings = {
   sheetName: 'APMERCH_DATABASE',
-  appsScriptUrl: '', // Configurable via Admin Settings or pre-connected
+  appsScriptUrl: import.meta.env.VITE_APPS_SCRIPT_URL || '',
   paymentMethods: INITIAL_PAYMENT_METHODS,
   gcashNumber: '09203963249',
   gcashAccountName: 'Mae Joey Balla',
