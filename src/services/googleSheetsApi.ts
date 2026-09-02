@@ -70,9 +70,18 @@ class GoogleSheetsApiService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.warn(`[APMERCH_DATABASE] Remote sync error on action "${action}":`, error);
-      return null;
-    }
+  console.error(
+    `[APMERCH_DATABASE] Remote sync error on action "${action}":`,
+    error
+  );
+
+  alert(
+    `Apps Script Error (${action}): ` +
+    (error instanceof Error ? error.message : String(error))
+  );
+
+  return null;
+}
   }
 
   /**
@@ -280,12 +289,12 @@ class GoogleSheetsApiService {
       previewBody: `Your 6-digit verification code is ${verificationCode}. Enter this code in the portal to verify your account.`
     });
 
-    const res = await this.executeAppsScript('registerCustomer', { customer: newCustomer });
-    if (res && res.success && res.customer) {
-      return { customer: res.customer, code: res.code || verificationCode };
-    }
+    const res = await this.executeAppsScript(
+  'registerCustomer',
+  { customer: newCustomer }
+);
 
-    return { customer: newCustomer, code: verificationCode };
+console.log('REGISTER RESPONSE:', res);
   }
 
   public async verifyCustomerEmail(email: string, code: string): Promise<Customer> {
