@@ -222,18 +222,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }
     } catch (error) {
-      console.warn('APMERCH_DATABASE synchronization error:', error);
+      console.error('APMERCH_DATABASE synchronization error:', error);
+      throw error;
     }
   };
 
   const syncWithGoogleSheets = async () => {
-    await refreshData();
-    addToast('success', 'APMERCH_DATABASE Synced', 'Successfully synchronized with Google Sheets single source of truth.');
+    try {
+      const url = googleSheetsApi.getAppsScriptUrl();
+      if (!url) {
+        addToast('error', 'Google Sheets Not Configured', 'VITE_APPS_SCRIPT_URL is not set. Please configure VITE_APPS_SCRIPT_URL or update the Apps Script URL in Settings.');
+        return;
+      }
+      await refreshData();
+      addToast('success', 'APMERCH_DATABASE Synced', 'Successfully synchronized with Google Sheets single source of truth.');
+    } catch (error: any) {
+      console.error('[APMERCH_DATABASE] Manual sync error:', error);
+      addToast('error', 'Google Sheets Sync Failed', error?.message || 'Could not communicate with Google Sheets.');
+    }
   };
 
   useEffect(() => {
     // Initial mount hydration from APMERCH_DATABASE
-    refreshData();
+    refreshData().catch(err => {
+      console.warn('[APMERCH_DATABASE] Initial mount synchronization warning:', err?.message || err);
+    });
 
     // Hydrate allowed client preferences from localStorage
     try {

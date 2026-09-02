@@ -73,90 +73,125 @@ class GoogleSheetsApiService {
   }
 
   public getAppsScriptUrl(): string {
+    const envGasUrl = (import.meta.env.VITE_APPS_SCRIPT_URL || '').trim();
+    if (envGasUrl) {
+      this.settings.appsScriptUrl = this.normalizeUrl(envGasUrl);
+      return this.settings.appsScriptUrl;
+    }
     if (this.settings.appsScriptUrl) {
       return this.normalizeUrl(this.settings.appsScriptUrl);
     }
-    const storedGasUrl = typeof window !== 'undefined' ? localStorage.getItem('APMERCH_APPS_SCRIPT_URL') || '' : '';
+    const storedGasUrl = typeof window !== 'undefined' ? (localStorage.getItem('APMERCH_APPS_SCRIPT_URL') || '').trim() : '';
     if (storedGasUrl) {
       this.settings.appsScriptUrl = this.normalizeUrl(storedGasUrl);
-      return this.settings.appsScriptUrl;
-    }
-    const envGasUrl = import.meta.env.VITE_APPS_SCRIPT_URL || '';
-    if (envGasUrl) {
-      this.settings.appsScriptUrl = this.normalizeUrl(envGasUrl);
       return this.settings.appsScriptUrl;
     }
     return '';
   }
 
   // --- Remote Apps Script API Client ---
+  /**
+   * Executes a remote call to Google Apps Script.
+   * Sends a POST request with Content-Type text/plain to avoid preflight (CORS simple request).
+   * Provides detailed error logging (HTTP status, response body, Apps Script error, fetch error).
+   * Throws an explicit error on failure — NEVER returns null silently.
+   */
   public async executeAppsScript(action: string, payload: any = {}): Promise<any> {
     const url = this.getAppsScriptUrl();
     if (!url) {
-      console.warn(`[APMERCH_DATABASE] executeAppsScript: No Apps Script URL configured for action "${action}".`);
-      return null;
+      const errMessage = `[APMERCH_DATABASE] executeAppsScript error: Google Apps Script Web App URL is not configured. Please set import.meta.env.VITE_APPS_SCRIPT_URL or configure the Apps Script URL in Settings.`;
+      console.error(errMessage, { action, payload });
+      throw new Error(errMessage);
     }
 
     const postPayload = {
       action,
       ...payload
     };
+    const bodyString = JSON.stringify(postPayload);
 
-    // 1. Primary: POST request with text/plain to avoid preflight (CORS simple request)
+    console.log(`[APMERCH_DATABASE] executeAppsScript: Sending POST request for action="${action}" to ${url}`, {
+      action,
+      payloadPreview: bodyString.length > 300 ? bodyString.substring(0, 300) + '...' : bodyString
+    });
+
+    let response: Response;
     try {
-      const response = await fetch(url, {
+      response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify(postPayload),
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: bodyString,
         redirect: 'follow'
       });
-
-      const text = await response.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(text);
-      } catch (jsonErr) {
-        console.warn(`[APMERCH_DATABASE] POST non-JSON response for action "${action}":`, text);
-      }
-
-      if (data) {
-        return data;
-      }
-    } catch (postError) {
-      console.warn(`[APMERCH_DATABASE] POST failed on action "${action}", attempting GET fallback:`, postError);
+    } catch (fetchErr: any) {
+      const fetchErrMsg = `[APMERCH_DATABASE] Fetch error for action="${action}": ${fetchErr?.message || fetchErr}`;
+      console.error(fetchErrMsg, {
+        action,
+        url,
+        error: fetchErr
+      });
+      throw new Error(
+        `Failed to reach Google Apps Script (${action}): ${fetchErr?.message || 'Network/CORS error'}. ` +
+        `Please verify that your Google Apps Script Web App is deployed with "Who has access: Anyone" and "Execute as: Me".`
+      );
     }
 
-    // 2. Secondary fallback: GET request (simple request, bypasses any POST redirect/CORS issues)
+    const httpStatus = response.status;
+    const httpStatusText = response.statusText;
+    let responseBody = '';
+
     try {
-      const getUrl = new URL(url);
-      getUrl.searchParams.set('action', action);
-      getUrl.searchParams.set('data', JSON.stringify(payload));
-      if (payload.customer) {
-        getUrl.searchParams.set('customer', typeof payload.customer === 'string' ? payload.customer : JSON.stringify(payload.customer));
-      }
-      if (payload.email) {
-        getUrl.searchParams.set('email', payload.email);
-      }
-
-      const getRes = await fetch(getUrl.toString(), {
-        method: 'GET',
-        redirect: 'follow'
-      });
-
-      const getText = await getRes.text();
-      try {
-        const getData = JSON.parse(getText);
-        if (getData) {
-          return getData;
-        }
-      } catch (e) {
-        console.warn(`[APMERCH_DATABASE] GET fallback non-JSON response for action "${action}":`, getText);
-      }
-    } catch (getError) {
-      console.warn(`[APMERCH_DATABASE] Remote sync error on action "${action}":`, getError);
+      responseBody = await response.text();
+    } catch (readErr: any) {
+      const readErrMsg = `[APMERCH_DATABASE] Failed to read response stream for action="${action}" (HTTP ${httpStatus}): ${readErr?.message || readErr}`;
+      console.error(readErrMsg, readErr);
+      throw new Error(readErrMsg);
     }
 
-    return null;
+    console.log(`[APMERCH_DATABASE] executeAppsScript response for action="${action}":`, {
+      httpStatus,
+      httpStatusText,
+      responseBodyLength: responseBody.length,
+      responseBodyPreview: responseBody.length > 500 ? responseBody.substring(0, 500) + '...' : responseBody
+    });
+
+    if (!response.ok) {
+      const httpErrMsg = `[APMERCH_DATABASE] Google Apps Script returned HTTP error ${httpStatus} (${httpStatusText}) for action="${action}": ${responseBody}`;
+      console.error(httpErrMsg);
+      throw new Error(`Google Apps Script HTTP Error ${httpStatus} (${httpStatusText}): ${responseBody.substring(0, 300)}`);
+    }
+
+    let parsedData: any;
+    try {
+      parsedData = JSON.parse(responseBody);
+    } catch (jsonErr: any) {
+      console.error(`[APMERCH_DATABASE] Google Apps Script returned non-JSON response for action="${action}":`, {
+        httpStatus,
+        responseBody
+      });
+      const titleMatch = responseBody.match(/<title>([^<]+)<\/title>/i);
+      const errorDetail = titleMatch && titleMatch[1] ? titleMatch[1].trim() : responseBody.substring(0, 250);
+      throw new Error(
+        `Google Apps Script returned invalid JSON (HTTP ${httpStatus}): ${errorDetail}. Please check deployment and permissions.`
+      );
+    }
+
+    if (!parsedData || typeof parsedData !== 'object') {
+      const invalidDataMsg = `[APMERCH_DATABASE] Google Apps Script returned invalid payload structure for action="${action}": ${responseBody}`;
+      console.error(invalidDataMsg);
+      throw new Error(invalidDataMsg);
+    }
+
+    if (parsedData.success === false) {
+      const scriptErrorMsg = parsedData.error || parsedData.message || 'Unknown error occurred in Apps Script';
+      console.error(`[APMERCH_DATABASE] Apps Script returned failure for action="${action}":`, {
+        error: scriptErrorMsg,
+        data: parsedData
+      });
+      throw new Error(`Google Apps Script Error: ${scriptErrorMsg}`);
+    }
+
+    return parsedData;
   }
 
   /**
@@ -197,42 +232,49 @@ class GoogleSheetsApiService {
     libraryItems: TeamKAALLibraryItem[];
     emailLogs: EmailLog[];
   }> {
-    const url = this.settings.appsScriptUrl || import.meta.env.VITE_APPS_SCRIPT_URL || '';
+    const url = this.getAppsScriptUrl();
     if (url) {
       this.settings.appsScriptUrl = url;
-      const res = await this.executeAppsScript('getInitialData');
-      if (res && res.success) {
-        if (res.settings && Object.keys(res.settings).length > 0) {
-          this.settings = { ...this.settings, ...res.settings, appsScriptUrl: url };
+      try {
+        const res = await this.executeAppsScript('getInitialData');
+        if (res && res.success) {
+          if (res.settings && Object.keys(res.settings).length > 0) {
+            this.settings = { ...this.settings, ...res.settings, appsScriptUrl: url };
+          }
+          if (Array.isArray(res.products) && res.products.length > 0) {
+            this.products = res.products;
+          }
+          if (Array.isArray(res.orders)) {
+            this.orders = res.orders;
+          }
+          if (Array.isArray(res.customers)) {
+            this.customers = res.customers;
+          }
+          if (Array.isArray(res.admins) && res.admins.length > 0) {
+            this.admins = res.admins;
+          }
+          if (Array.isArray(res.payments)) {
+            this.payments = res.payments;
+          }
+          if (Array.isArray(res.collections) && res.collections.length > 0) {
+            this.collections = res.collections;
+          }
+          if (Array.isArray(res.fanProjects) && res.fanProjects.length > 0) {
+            this.fanProjects = res.fanProjects;
+          }
+          if (Array.isArray(res.libraryItems) && res.libraryItems.length > 0) {
+            this.libraryItems = res.libraryItems;
+          }
+          if (Array.isArray(res.emailLogs)) {
+            this.emailLogs = res.emailLogs;
+          }
         }
-        if (Array.isArray(res.products) && res.products.length > 0) {
-          this.products = res.products;
-        }
-        if (Array.isArray(res.orders)) {
-          this.orders = res.orders;
-        }
-        if (Array.isArray(res.customers)) {
-          this.customers = res.customers;
-        }
-        if (Array.isArray(res.admins) && res.admins.length > 0) {
-          this.admins = res.admins;
-        }
-        if (Array.isArray(res.payments)) {
-          this.payments = res.payments;
-        }
-        if (Array.isArray(res.collections) && res.collections.length > 0) {
-          this.collections = res.collections;
-        }
-        if (Array.isArray(res.fanProjects) && res.fanProjects.length > 0) {
-          this.fanProjects = res.fanProjects;
-        }
-        if (Array.isArray(res.libraryItems) && res.libraryItems.length > 0) {
-          this.libraryItems = res.libraryItems;
-        }
-        if (Array.isArray(res.emailLogs)) {
-          this.emailLogs = res.emailLogs;
-        }
+      } catch (err: any) {
+        console.error('[APMERCH_DATABASE] syncWithSheet error fetching getInitialData:', err);
+        throw err;
       }
+    } else {
+      console.warn('[APMERCH_DATABASE] syncWithSheet: VITE_APPS_SCRIPT_URL is not set. Default in-memory data will be used.');
     }
 
     return {
@@ -374,22 +416,13 @@ class GoogleSheetsApiService {
 
     console.log('REGISTER RESPONSE:', res);
 
-    if (!res || !res.success) {
-      const errMsg = res?.error || res?.message || 'Failed to register customer in Google Sheets. Please verify your Apps Script connection.';
+    if (!res || !res.success || !res.customer) {
+      const errMsg = res?.error || res?.message || 'Failed to register customer in Google Sheets Customers tab. Single source of truth write failed.';
+      console.error('[APMERCH_DATABASE] registerCustomer failed:', errMsg, res);
       throw new Error(errMsg);
     }
 
-    const savedCustomer: Customer = res.customer || {
-      id: newCustomer.id,
-      fullName: newCustomer.fullName,
-      email: newCustomer.email,
-      mobileNumber: newCustomer.mobileNumber,
-      facebookName: newCustomer.facebookName,
-      isVerified: false,
-      verificationCode: res.code || verificationCode,
-      createdAt: newCustomer.createdAt,
-      lastLoginAt: newCustomer.lastLoginAt
-    };
+    const savedCustomer: Customer = res.customer;
 
     const idx = this.customers.findIndex(c => c.email.trim().toLowerCase() === emailClean);
     if (idx >= 0) {
