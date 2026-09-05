@@ -128,6 +128,9 @@ interface AppContextType {
   deleteLibraryItem: (id: string) => Promise<boolean>;
   uploadDriveImage: (fileData: string, fileName: string, folder: 'Payment_Qr' | 'Logos' | 'Merchandise' | 'Collection' | 'FanProjects' | 'Homepage' | 'TeamKAAL') => Promise<string>;
   updateOrderStatus: (orderNumber: string, status: OrderStatus, paymentStatus?: PaymentStatus, notes?: string, sendEmail?: boolean) => Promise<Order>;
+  addAdminOrder: (orderData: Partial<Order>) => Promise<Order>;
+  updateOrder: (order: Order) => Promise<Order>;
+  deleteOrder: (orderNumber: string) => Promise<boolean>;
   updateSettings: (newSettings: Partial<AppSettings>) => Promise<AppSettings>;
   sendManualEmail: (toEmail: string, recipientName: string, subject: string, templateType: EmailTemplateType, orderNumber?: string, customBody?: string) => Promise<EmailLog>;
   addAdminUser: (admin: { email: string; name: string; role: 'Super Admin' | 'Admin' }) => Promise<AdminUser>;
@@ -318,7 +321,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   useEffect(() => {
     const updateCountdown = () => {
-      const deadline = new Date(settings?.preorderCloseDate || '2026-09-20T23:59:59+08:00').getTime();
+      // If manually forced open/closed, override countdown
+      if (settings?.preorderStatusManual === 'closed') {
+        setTimeRemaining({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true });
+        return;
+      }
+      if (settings?.preorderStatusManual === 'open') {
+        setTimeRemaining({ days: 99, hours: 23, minutes: 59, seconds: 59, isExpired: false });
+        return;
+      }
+
+      let rawDate = settings?.preorderCloseDate || '2026-09-20T23:59:59+08:00';
+      // If user typed a date like "2026-09-20" or "September 20, 2026", ensure time is included
+      if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate.trim())) {
+        rawDate = `${rawDate.trim()}T23:59:59+08:00`;
+      }
+      let deadline = new Date(rawDate).getTime();
+      if (isNaN(deadline)) {
+        deadline = new Date('2026-09-20T23:59:59+08:00').getTime();
+      }
+
       const now = new Date().getTime();
       const difference = deadline - now;
 
@@ -337,10 +359,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [settings.preorderCloseDate]);
+  }, [settings.preorderCloseDate, settings.preorderStatusManual]);
 
-  const isPreorderClosed = timeRemaining.isExpired;
-  const isPreorderActive = !timeRemaining.isExpired;
+  const isPreorderClosed = settings?.preorderStatusManual === 'closed' || (settings?.preorderStatusManual !== 'open' && timeRemaining.isExpired);
+  const isPreorderActive = !isPreorderClosed;
   const isPreorderUpcoming = false;
 
   // Cart operations
@@ -689,6 +711,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return updated;
   };
 
+  const addAdminOrder = async (orderData: Partial<Order>) => {
+    const created = await googleSheetsApi.adminCreateOrder(orderData);
+    await refreshData();
+    addToast('success', 'Order Created', `Order ${created.orderNumber} successfully added.`);
+    return created;
+  };
+
+  const updateOrder = async (order: Order) => {
+    const updated = await googleSheetsApi.adminUpdateOrder(order);
+    await refreshData();
+    addToast('success', 'Order Updated', `Order ${updated.orderNumber} details saved.`);
+    return updated;
+  };
+
+  const deleteOrder = async (orderNumber: string) => {
+    const success = await googleSheetsApi.adminDeleteOrder(orderNumber);
+    await refreshData();
+    addToast('info', 'Order Deleted', `Order ${orderNumber} has been removed.`);
+    return success;
+  };
+
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
     const updated = await googleSheetsApi.updateSettings(newSettings);
     setSettings(updated);
@@ -727,9 +770,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Toast UI
-  const addToast = (type: 'success' | 'error' | 'info' | 'warning', title: string, message: string) => {
+  const addToast = (type: 'success' | 'error' | 'info' | 'warning', title: any, message: any) => {
     const id = `TOAST-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
-    setToasts(prev => [...prev, { id, type, title, message }]);
+    
+    let safeTitle = 'Notification';
+    if (typeof title === 'string') {
+      safeTitle = title;
+    } else if (title && typeof title === 'object') {
+      safeTitle = title.message || title.title || 'Notification';
+    }
+
+    let safeMessage = '';
+    if (typeof message === 'string') {
+      safeMessage = message;
+    } else if (message && typeof message === 'object') {
+      safeMessage = message.message || message.error || (message._reactName ? '' : JSON.stringify(message));
+    } else if (message !== undefined && message !== null) {
+      safeMessage = String(message);
+    }
+
+    setToasts(prev => [...prev, { id, type, title: String(safeTitle), message: String(safeMessage) }]);
     setTimeout(() => {
       removeToast(id);
     }, 4500);
@@ -811,6 +871,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         deleteLibraryItem,
         uploadDriveImage,
         updateOrderStatus,
+        addAdminOrder,
+        updateOrder,
+        deleteOrder,
         updateSettings,
         sendManualEmail,
         addAdminUser,

@@ -4,7 +4,9 @@ import { Sparkles, Heart, ShieldCheck, Calendar, MapPin, Lock, Download } from '
 import { PanayEmblem, KaalLogo } from './Logos';
 
 export const Footer: React.FC = () => {
-  const { openModal, settings } = useApp();
+  const { openModal, settings, isAdminLoggedIn } = useApp();
+
+  const brandTitle = settings.headerBrandName || "A'TIN Panay";
 
   return (
     <footer className="bg-white border-t border-purple-100 text-slate-600 text-xs">
@@ -15,20 +17,38 @@ export const Footer: React.FC = () => {
           {/* Brand Col */}
           <div className="md:col-span-2 space-y-3">
             <div className="flex items-center gap-3">
-              <PanayEmblem size={36} />
-              <KaalLogo size={24} />
+              {settings.logoUrl ? (
+                <img 
+                  src={settings.logoUrl} 
+                  alt={brandTitle} 
+                  className="w-9 h-9 rounded-full object-cover border-2 border-purple-200"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              ) : (
+                <PanayEmblem size={36} />
+              )}
+              {settings.teamKaalLogoUrl ? (
+                <img 
+                  src={settings.teamKaalLogoUrl} 
+                  alt="KAAL" 
+                  className="w-6 h-6 rounded-full object-cover border-2 border-white shadow-sm"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              ) : (
+                <KaalLogo size={24} />
+              )}
               <div>
                 <span className="font-black text-slate-900 text-base tracking-tight block">
-                  A'TIN Panay Community Hub
+                  {brandTitle} Community Hub
                 </span>
                 <span className="text-[11px] text-purple-700 font-semibold">
-                  BlockScreening Exclusive Merchandise
+                  {settings.homepageTagline || "BlockScreening Exclusive Merchandise"}
                 </span>
               </div>
             </div>
             
             <p className="text-slate-600 text-xs leading-relaxed max-w-md">
-              Official exclusive merchandise portal organized by <strong>A'TIN Panay x Team KAAL</strong>. Dedicated to providing premium commemorative goods, fan projects, and archival collections for SB19 fans across Panay Island and Western Visayas.
+              Official exclusive merchandise portal organized by <strong>{settings.organizerName || "A'TIN Panay x Team KAAL"}</strong>. Dedicated to providing premium commemorative goods, fan projects, and archival collections for SB19 fans across Panay Island and Western Visayas.
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-2 text-[11px] text-slate-700">
@@ -38,7 +58,7 @@ export const Footer: React.FC = () => {
               </span>
               <span className="flex items-center gap-1 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-100 font-medium">
                 <MapPin className="w-3.5 h-3.5 text-purple-600" />
-                Cinema Panay Screen 1 (Iloilo City)
+                {settings.pickupLocation || 'Cinema Panay Screen 1 (Iloilo City)'}
               </span>
             </div>
           </div>
@@ -101,16 +121,6 @@ export const Footer: React.FC = () => {
                   Track Order Status
                 </button>
               </li>
-              <li className="pt-1">
-                <a
-                  href="/atin-panay-hub.zip"
-                  download="atin-panay-hub.zip"
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 font-bold transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5 text-purple-600" />
-                  <span>Download for VS Code (.ZIP)</span>
-                </a>
-              </li>
             </ul>
           </div>
 
@@ -143,7 +153,7 @@ export const Footer: React.FC = () => {
         {/* Bottom copyright line */}
         <div className="pt-6 border-t border-purple-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
           <div>
-            © 2026 A'TIN Panay x Team KAAL. All rights reserved.
+            © 2026 {brandTitle}. All rights reserved.
           </div>
           <div className="flex items-center gap-1 font-medium">
             Made with <Heart className="w-3 h-3 text-pink-500 fill-pink-500" /> for SB19 & A'TIN Panay

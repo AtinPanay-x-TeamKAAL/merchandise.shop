@@ -67,12 +67,31 @@ export const INITIAL_SETTINGS: AppSettings = {
   maribankQrUrl: '',
   preorderOpenDate: '2026-09-01T00:00:00+08:00',
   preorderCloseDate: '2026-09-20T23:59:59+08:00',
+  preorderWindowText: 'Sept 1 – Sept 20, 2026',
+  preorderStatusManual: 'auto',
+  preorderOpenDescription: "Lock in your exclusive A'TIN Panay x Team KAAL BlockScreening merchandise before slots close on September 20, 2026 at 11:59 PM PHT.",
+  preorderClosedDescription: 'All slots for this production batch are officially sealed. Orders are now in queue for production and October 11, 2026 claiming.',
   pickupDate: 'October 11, 2026',
   pickupLocation: 'A\'TIN Panay BlockScreening Venue (Cinema Panay / Iloilo Hub)',
   deliveryOptionEnabled: false,
   announcementText: '✨ Pre-orders are strictly open until September 20, 2026. Claiming date is October 11, 2026 on the BlockScreening event day!',
   supportEmail: 'atinpanay.merch@gmail.com',
-  organizerName: 'A\'TIN Panay x Team KAAL'
+  organizerName: 'A\'TIN Panay x Team KAAL',
+  headerBrandName: 'A\'TIN PANAY',
+  headerSubtitle: 'Community Hub & Exclusive Merch',
+  headerBadgeText: 'x KAAL',
+  capsuleBrandName: 'A\'TIN Panay',
+  capsuleSubtitle: 'Official Merch Capsule',
+  capsuleBadgeText: 'EXCLUSIVE BATCH',
+  capsuleFlagshipBadgeText: 'Flagship Drop',
+  capsuleFeaturedTitle: 'BlockScreening T-Shirt (Lavender)',
+  capsuleFeaturedSubtitle: 'Premium Cotton • Sizes TS to XXL',
+  capsuleFeaturedPriceText: '₱550 - ₱580',
+  capsulePartnershipText: 'In partnership with Team KAAL',
+  capsuleFanKitButtonText: 'View Fan Kit',
+  homepageHeroTitle: 'A\'TIN Panay Community Hub',
+  homepageTagline: 'BlockScreening Exclusive Merchandise',
+  homepageDescription: 'Official merchandise, fan projects, collections, stories and community updates for A\'TIN Panay.'
 };
 
 export const INITIAL_PRODUCTS: Product[] = [

@@ -29,16 +29,16 @@ export const CountdownTimer: React.FC = () => {
 
           <p className="text-sm text-slate-600 leading-relaxed font-normal">
             {isPreorderClosed ? (
-              'All slots for this production batch are officially sealed. Orders are now in queue for production and October 11, 2026 claiming.'
+              settings.preorderClosedDescription || 'All slots for this production batch are officially sealed. Orders are now in queue for production and claiming.'
             ) : (
-              'Lock in your exclusive A\'TIN Panay x Team KAAL BlockScreening merchandise before slots close on September 20, 2026 at 11:59 PM PHT.'
+              settings.preorderOpenDescription || "Lock in your exclusive A'TIN Panay x Team KAAL BlockScreening merchandise before slots close on the scheduled deadline."
             )}
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-700">
             <div className="flex items-center gap-1.5 bg-purple-50/80 px-3 py-1.5 rounded-xl border border-purple-100">
               <Calendar className="w-4 h-4 text-purple-600" />
-              <span><strong>Pre-Order:</strong> Sept 1 – Sept 20, 2026</span>
+              <span><strong>Pre-Order:</strong> {settings.preorderWindowText || (settings.preorderCloseDate ? `Open until ${settings.preorderCloseDate.split('T')[0]}` : 'Sept 1 – Sept 20, 2026')}</span>
             </div>
             <div className="flex items-center gap-1.5 bg-purple-50/80 px-3 py-1.5 rounded-xl border border-purple-100">
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -100,7 +100,7 @@ export const CountdownTimer: React.FC = () => {
 
           <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-medium">
             <Clock className="w-3.5 h-3.5 text-purple-600" />
-            Strict Pre-order Cutoff: September 20, 2026 (23:59 PHT)
+            <span>Pre-order Cutoff: {settings.preorderCloseDate ? (settings.preorderCloseDate.includes('T') ? settings.preorderCloseDate.replace('T', ' ') : settings.preorderCloseDate) : 'September 20, 2026 (23:59 PHT)'}</span>
           </div>
         </div>
       </div>

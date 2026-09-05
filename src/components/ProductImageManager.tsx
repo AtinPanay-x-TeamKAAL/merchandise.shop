@@ -21,6 +21,9 @@ import {
 } from 'lucide-react';
 import { ProductGalleryItem, ProductCategory } from '../types';
 import { googleSheetsApi } from '../services/googleSheetsApi';
+import { optimizeImageFile, isImageFile } from '../utils/imageOptimizer';
+
+export { optimizeImageFile };
 
 interface ProductImageManagerProps {
   galleryImages: ProductGalleryItem[];
@@ -73,57 +76,6 @@ const SUGGESTED_LABELS = [
   'Lifestyle / In-Use'
 ];
 
-/**
- * Optimizes an uploaded image file (JPG, PNG, WEBP) via Canvas client-side
- * to ensure high resolution while preventing excessive storage payload.
- */
-export const optimizeImageFile = (file: File, maxDimension = 1400, quality = 0.88): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    if (!file.type.match(/image\/(jpeg|png|webp|jpg)/i)) {
-      reject(new Error('Unsupported file type. Please upload JPG, PNG, or WEBP images.'));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
-
-        // Draw and export optimized image
-        ctx.drawImage(img, 0, 0, width, height);
-        const outputType = file.type.includes('png') ? 'image/png' : 'image/jpeg';
-        const dataUrl = canvas.toDataURL(outputType, quality);
-        resolve(dataUrl);
-      };
-      img.onerror = () => reject(new Error('Failed to read image file'));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => reject(new Error('Failed to read file from disk'));
-    reader.readAsDataURL(file);
-  });
-};
-
 export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
   galleryImages,
   coverImageUrl,
@@ -165,29 +117,40 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
 
   // Handle uploading new images
   const handleFiles = async (files: FileList | File[]) => {
+    if (!files || files.length === 0) return;
     setIsProcessing(true);
     setErrorMessage(null);
 
     const newImages: ProductGalleryItem[] = [...safeGalleryImages];
     let defaultCover = coverImageUrl;
+    let addedCount = 0;
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (!file.type.match(/image\/(jpeg|png|webp|jpg)/i)) {
+        if (!isImageFile(file)) {
+          console.warn('Skipping non-image file:', file.name);
           continue;
         }
 
-        const dataUrl = await optimizeImageFile(file);
+        let dataUrl: string;
+        try {
+          dataUrl = await optimizeImageFile(file, { maxDimension: 1400, quality: 0.88 });
+        } catch (optimizeErr: any) {
+          console.warn('Could not optimize image, skipping:', file.name, optimizeErr);
+          continue;
+        }
+
         let finalUrl = dataUrl;
         try {
           finalUrl = await googleSheetsApi.uploadImage(dataUrl, file.name, 'Merchandise');
-        } catch {
+        } catch (uploadErr) {
+          console.warn('Drive upload fallback to data URL:', uploadErr);
           finalUrl = dataUrl;
         }
         
         // Auto-assign smart label if preset labels exist
-        let assignedLabel = labelInput;
+        let assignedLabel = labelInput.trim();
         if (newImages.length < currentPreset.labels.length) {
           assignedLabel = currentPreset.labels[newImages.length];
         } else if (file.name) {
@@ -195,10 +158,20 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
           assignedLabel = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
         }
 
+        if (!assignedLabel) {
+          assignedLabel = `Photo #${newImages.length + 1}`;
+        }
+
         newImages.push({
           label: assignedLabel,
           url: finalUrl
         });
+        addedCount++;
+      }
+
+      if (addedCount === 0 && files.length > 0) {
+        setErrorMessage('No valid image files found. Please upload JPG, PNG, WEBP, or GIF images.');
+        return;
       }
 
       if (!defaultCover && newImages.length > 0) {
@@ -207,6 +180,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
 
       onChange(newImages, defaultCover || (newImages[0] ? newImages[0].url : ''));
     } catch (err: any) {
+      console.error('Error processing uploaded images:', err);
       setErrorMessage(err.message || 'Error processing uploaded image.');
     } finally {
       setIsProcessing(false);
@@ -381,11 +355,18 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
       {/* Primary Input Container */}
       {inputMode === 'upload' ? (
         <div
+          tabIndex={0}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          onPaste={(e) => {
+            if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+              e.preventDefault();
+              handleFiles(e.clipboardData.files);
+            }
+          }}
           onClick={() => fileInputRef.current?.click()}
-          className={`relative border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 ${
+          className={`relative border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 outline-none focus:border-[#7c5cb7] ${
             isDraggingOver
               ? 'border-[#f472b6] bg-[#f472b6]/10 scale-[1.01]'
               : 'border-[#232f4b] hover:border-[#7c5cb7] bg-[#131b2e]/50 hover:bg-[#131b2e]'
@@ -395,7 +376,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/jpeg,image/png,image/webp,image/jpg"
+            accept="image/*"
             className="hidden"
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) {
@@ -418,7 +399,7 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
                 {isProcessing ? 'Optimizing & Uploading Images...' : 'Click to select or Drag & Drop Images Here'}
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Supports <span className="text-slate-200 font-semibold">JPG, PNG, WEBP</span> • Multiple files allowed
+                Supports <span className="text-slate-200 font-semibold">JPG, PNG, WEBP, GIF, SVG, AVIF</span> • Multiple files & clipboard paste (Ctrl+V) allowed
               </p>
             </div>
 

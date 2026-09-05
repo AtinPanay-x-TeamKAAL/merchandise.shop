@@ -17,6 +17,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { Order, OrderStatus } from '../types';
+import { optimizeImageFile, isImageFile } from '../utils/imageOptimizer';
 
 export const CustomerDashboard: React.FC = () => {
   const { 
@@ -55,15 +56,23 @@ export const CustomerDashboard: React.FC = () => {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setProofUrl(reader.result as string);
-      addToast('success', 'Receipt Attached', 'Payment proof image loaded.');
-    };
-    reader.readAsDataURL(file);
+
+    if (!isImageFile(file)) {
+      addToast('error', 'Invalid Image', 'Please upload a valid image file (JPG, PNG, WEBP, etc.).');
+      return;
+    }
+
+    try {
+      const optimized = await optimizeImageFile(file, { maxDimension: 1200, quality: 0.85 });
+      setProofUrl(optimized);
+      addToast('success', 'Receipt Attached', 'Payment proof image loaded and optimized.');
+    } catch (err: any) {
+      console.error('Error optimizing receipt image:', err);
+      addToast('error', 'Upload Error', err?.message || 'Could not process receipt image.');
+    }
   };
 
   const handleSaveProof = async () => {

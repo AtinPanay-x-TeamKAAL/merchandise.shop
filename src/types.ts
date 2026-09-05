@@ -95,6 +95,7 @@ export interface Order {
   customerEmail: string;
   customerMobile: string;
   customerFacebook?: string;
+  customerTwitter?: string;
   items: OrderItem[];
   subtotal: number;
   totalAmount: number;
@@ -256,6 +257,10 @@ export interface AppSettings {
   maribankQrUrl?: string;
   preorderOpenDate: string;
   preorderCloseDate: string;
+  preorderWindowText?: string;
+  preorderStatusManual?: 'auto' | 'open' | 'closed';
+  preorderOpenDescription?: string;
+  preorderClosedDescription?: string;
   pickupDate: string;
   pickupLocation: string;
   deliveryOptionEnabled: boolean;
@@ -267,6 +272,20 @@ export interface AppSettings {
   teamKaalLogoUrl?: string;
   homepageHeroImageUrl?: string;
   homepageTagline?: string;
+  homepageHeroTitle?: string;
+  homepageDescription?: string;
+  headerBrandName?: string;
+  headerSubtitle?: string;
+  headerBadgeText?: string;
+  capsuleBrandName?: string;
+  capsuleSubtitle?: string;
+  capsuleBadgeText?: string;
+  capsuleFlagshipBadgeText?: string;
+  capsuleFeaturedTitle?: string;
+  capsuleFeaturedSubtitle?: string;
+  capsuleFeaturedPriceText?: string;
+  capsulePartnershipText?: string;
+  capsuleFanKitButtonText?: string;
 }
 
 export interface CartItem {

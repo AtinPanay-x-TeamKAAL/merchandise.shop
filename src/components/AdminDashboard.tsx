@@ -45,6 +45,8 @@ import { INITIAL_PAYMENT_METHODS } from '../data/initialData';
 import { AdminCollectionsTab } from './admin/AdminCollectionsTab';
 import { AdminFanProjectsTab } from './admin/AdminFanProjectsTab';
 import { AdminLibraryTab } from './admin/AdminLibraryTab';
+import { AdminOrderModal } from './admin/AdminOrderModal';
+import { AdminOrderDeleteModal } from './admin/AdminOrderDeleteModal';
 import { ImageUploadField } from './ImageUploadField';
 import { LockInModal } from './LockInModal';
 
@@ -60,6 +62,9 @@ export const AdminDashboard: React.FC = () => {
     fanProjects,
     teamKaalItems,
     updateOrderStatus, 
+    addAdminOrder,
+    updateOrder,
+    deleteOrder,
     addNewProduct, 
     updateProduct, 
     deleteProduct, 
@@ -85,6 +90,11 @@ export const AdminDashboard: React.FC = () => {
   const [orderSearch, setOrderSearch] = useState('');
   const [selectedProofOrder, setSelectedProofOrder] = useState<Order | null>(null);
 
+  // Order CRUD modals
+  const [showAddOrderModal, setShowAddOrderModal] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState<Order | null>(null);
+
   // Products state & modal
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -109,12 +119,31 @@ export const AdminDashboard: React.FC = () => {
   const [gasUrl, setGasUrl] = useState(settings.appsScriptUrl);
   const [sheetName, setSheetName] = useState(settings.sheetName);
   const [preorderDeadline, setPreorderDeadline] = useState(settings.preorderCloseDate);
-  const [pickupDate, setPickupDate] = useState(settings.pickupDate);
-  const [pickupLocation, setPickupLocation] = useState(settings.pickupLocation);
+  const [preorderOpenDate, setPreorderOpenDate] = useState(settings.preorderOpenDate || '2026-09-01T00:00:00+08:00');
+  const [preorderWindowText, setPreorderWindowText] = useState(settings.preorderWindowText || 'Sept 1 – Sept 20, 2026');
+  const [preorderStatusManual, setPreorderStatusManual] = useState<'auto' | 'open' | 'closed'>(settings.preorderStatusManual || 'auto');
+  const [preorderOpenDescription, setPreorderOpenDescription] = useState(settings.preorderOpenDescription || "Lock in your exclusive A'TIN Panay x Team KAAL BlockScreening merchandise before slots close on September 20, 2026 at 11:59 PM PHT.");
+  const [preorderClosedDescription, setPreorderClosedDescription] = useState(settings.preorderClosedDescription || 'All slots for this production batch are officially sealed. Orders are now in queue for production and October 11, 2026 claiming.');
+  const [pickupDate, setPickupDate] = useState(settings.pickupDate || 'October 11, 2026');
+  const [pickupLocation, setPickupLocation] = useState(settings.pickupLocation || 'Cinema Panay Screen 1 Lobby (SM City Iloilo)');
   const [logoUrl, setLogoUrl] = useState(settings.logoUrl || '');
   const [teamKaalLogoUrl, setTeamKaalLogoUrl] = useState(settings.teamKaalLogoUrl || '');
   const [homepageHeroImageUrl, setHomepageHeroImageUrl] = useState(settings.homepageHeroImageUrl || '');
   const [homepageTagline, setHomepageTagline] = useState(settings.homepageTagline || "Official Panay Merch Capsule & Team KAAL Corner");
+  const [homepageHeroTitle, setHomepageHeroTitle] = useState(settings.homepageHeroTitle || "A'TIN Panay Community Hub");
+  const [homepageDescription, setHomepageDescription] = useState(settings.homepageDescription || "Official merchandise, fan projects, collections, stories and community updates for A'TIN Panay.");
+  const [headerBrandName, setHeaderBrandName] = useState(settings.headerBrandName || "A'TIN PANAY");
+  const [headerSubtitle, setHeaderSubtitle] = useState(settings.headerSubtitle || "Community Hub & Exclusive Merch");
+  const [headerBadgeText, setHeaderBadgeText] = useState(settings.headerBadgeText || "x KAAL");
+  const [capsuleBrandName, setCapsuleBrandName] = useState(settings.capsuleBrandName || "A'TIN Panay");
+  const [capsuleSubtitle, setCapsuleSubtitle] = useState(settings.capsuleSubtitle || "Official Merch Capsule");
+  const [capsuleBadgeText, setCapsuleBadgeText] = useState(settings.capsuleBadgeText || "EXCLUSIVE BATCH");
+  const [capsuleFlagshipBadgeText, setCapsuleFlagshipBadgeText] = useState(settings.capsuleFlagshipBadgeText || "Flagship Drop");
+  const [capsuleFeaturedTitle, setCapsuleFeaturedTitle] = useState(settings.capsuleFeaturedTitle || "BlockScreening T-Shirt (Lavender)");
+  const [capsuleFeaturedSubtitle, setCapsuleFeaturedSubtitle] = useState(settings.capsuleFeaturedSubtitle || "Premium Cotton • Sizes TS to XXL");
+  const [capsuleFeaturedPriceText, setCapsuleFeaturedPriceText] = useState(settings.capsuleFeaturedPriceText || "₱550 - ₱580");
+  const [capsulePartnershipText, setCapsulePartnershipText] = useState(settings.capsulePartnershipText || "In partnership with Team KAAL");
+  const [capsuleFanKitButtonText, setCapsuleFanKitButtonText] = useState(settings.capsuleFanKitButtonText || "View Fan Kit");
   const [adminContactEmail, setAdminContactEmail] = useState(settings.adminContactEmail || 'admin@atinpanay.com');
   const [paymentMethodsList, setPaymentMethodsList] = useState<PaymentMethodConfig[]>(() => {
     let list: any = settings.paymentMethods;
@@ -126,6 +155,41 @@ export const AdminDashboard: React.FC = () => {
     }
     return INITIAL_PAYMENT_METHODS;
   });
+
+  // Keep settings states in sync if updated from cloud sync (only when not editing settings tab)
+  useEffect(() => {
+    if (settings && activeTab !== 'settings') {
+      if (settings.appsScriptUrl) setGasUrl(settings.appsScriptUrl);
+      if (settings.sheetName) setSheetName(settings.sheetName);
+      if (settings.preorderCloseDate) setPreorderDeadline(settings.preorderCloseDate);
+      if (settings.preorderOpenDate) setPreorderOpenDate(settings.preorderOpenDate);
+      if (settings.preorderWindowText) setPreorderWindowText(settings.preorderWindowText);
+      if (settings.preorderStatusManual) setPreorderStatusManual(settings.preorderStatusManual);
+      if (settings.preorderOpenDescription) setPreorderOpenDescription(settings.preorderOpenDescription);
+      if (settings.preorderClosedDescription) setPreorderClosedDescription(settings.preorderClosedDescription);
+      if (settings.pickupDate) setPickupDate(settings.pickupDate);
+      if (settings.pickupLocation) setPickupLocation(settings.pickupLocation);
+      if (settings.logoUrl !== undefined) setLogoUrl(settings.logoUrl || '');
+      if (settings.teamKaalLogoUrl !== undefined) setTeamKaalLogoUrl(settings.teamKaalLogoUrl || '');
+      if (settings.homepageHeroImageUrl !== undefined) setHomepageHeroImageUrl(settings.homepageHeroImageUrl || '');
+      if (settings.homepageTagline !== undefined) setHomepageTagline(settings.homepageTagline || '');
+      if (settings.homepageHeroTitle !== undefined) setHomepageHeroTitle(settings.homepageHeroTitle || '');
+      if (settings.homepageDescription !== undefined) setHomepageDescription(settings.homepageDescription || '');
+      if (settings.headerBrandName !== undefined) setHeaderBrandName(settings.headerBrandName || '');
+      if (settings.headerSubtitle !== undefined) setHeaderSubtitle(settings.headerSubtitle || '');
+      if (settings.headerBadgeText !== undefined) setHeaderBadgeText(settings.headerBadgeText || '');
+      if (settings.capsuleBrandName !== undefined) setCapsuleBrandName(settings.capsuleBrandName || '');
+      if (settings.capsuleSubtitle !== undefined) setCapsuleSubtitle(settings.capsuleSubtitle || '');
+      if (settings.capsuleBadgeText !== undefined) setCapsuleBadgeText(settings.capsuleBadgeText || '');
+      if (settings.capsuleFlagshipBadgeText !== undefined) setCapsuleFlagshipBadgeText(settings.capsuleFlagshipBadgeText || '');
+      if (settings.capsuleFeaturedTitle !== undefined) setCapsuleFeaturedTitle(settings.capsuleFeaturedTitle || '');
+      if (settings.capsuleFeaturedSubtitle !== undefined) setCapsuleFeaturedSubtitle(settings.capsuleFeaturedSubtitle || '');
+      if (settings.capsuleFeaturedPriceText !== undefined) setCapsuleFeaturedPriceText(settings.capsuleFeaturedPriceText || '');
+      if (settings.capsulePartnershipText !== undefined) setCapsulePartnershipText(settings.capsulePartnershipText || '');
+      if (settings.capsuleFanKitButtonText !== undefined) setCapsuleFanKitButtonText(settings.capsuleFanKitButtonText || '');
+      if (settings.adminContactEmail) setAdminContactEmail(settings.adminContactEmail);
+    }
+  }, [settings, activeTab]);
 
   // Keep paymentMethodsList in sync if settings updates from cloud sync
   useEffect(() => {
@@ -251,8 +315,10 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleSaveSettings = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveSettings = (e?: React.FormEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     setShowSettingsLockModal(true);
   };
 
@@ -263,12 +329,31 @@ export const AdminDashboard: React.FC = () => {
         appsScriptUrl: gasUrl,
         sheetName,
         preorderCloseDate: preorderDeadline,
+        preorderOpenDate,
+        preorderWindowText,
+        preorderStatusManual,
+        preorderOpenDescription,
+        preorderClosedDescription,
         pickupDate,
         pickupLocation,
         logoUrl,
         teamKaalLogoUrl,
         homepageHeroImageUrl,
+        homepageHeroTitle,
         homepageTagline,
+        homepageDescription,
+        headerBrandName,
+        headerSubtitle,
+        headerBadgeText,
+        capsuleBrandName,
+        capsuleSubtitle,
+        capsuleBadgeText,
+        capsuleFlagshipBadgeText,
+        capsuleFeaturedTitle,
+        capsuleFeaturedSubtitle,
+        capsuleFeaturedPriceText,
+        capsulePartnershipText,
+        capsuleFanKitButtonText,
         adminContactEmail,
         paymentMethods: paymentMethodsList,
         gcashAccountName: paymentMethodsList[0]?.accountName || 'Mae Joey Balla',
@@ -279,7 +364,7 @@ export const AdminDashboard: React.FC = () => {
         maribankQrUrl: paymentMethodsList.find(p => p.name.toLowerCase().includes('mari'))?.qrCodeUrl
       });
       setShowSettingsLockModal(false);
-      addToast('success', 'Settings Locked In', 'All branding, logos, and schedule settings are permanently locked in.');
+      addToast('success', 'Settings Locked In', 'All header branding, merch capsule texts, logos, and schedule settings are permanently locked in.');
     } catch (err: any) {
       console.error('Failed to lock in settings:', err);
       alert(err.message || 'Failed to lock in settings.');
@@ -294,10 +379,14 @@ export const AdminDashboard: React.FC = () => {
     setIsSyncing(false);
   };
 
-  const handleOpenAddProduct = (presetCat: ProductCategory = 'Apparel') => {
+  const handleOpenAddProduct = (presetCat?: ProductCategory | any) => {
+    const safeCat: ProductCategory = (typeof presetCat === 'string' && ['Apparel', 'Drinkware', 'Merchandise', 'Collections', 'Fan Projects', 'Digital Products', 'Team KAAL Publications'].includes(presetCat))
+      ? (presetCat as ProductCategory)
+      : 'Apparel';
+
     setEditingProduct(null);
     setPTitle('');
-    setPCategory(presetCat);
+    setPCategory(safeCat);
     setPPrice('550');
     setPXxlPrice('580');
     setPColor('Lavender');
@@ -435,13 +524,34 @@ export const AdminDashboard: React.FC = () => {
                 {currentAdmin?.role || 'Super Admin'}
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              Logged in as: <strong className="text-slate-200">{currentAdmin?.email}</strong> • Google Sheet: <strong className="text-[#b19cd9]">APMERCH_DATABASE</strong>
-            </p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400 mt-1">
+              <span>Logged in as: <strong className="text-slate-200">{currentAdmin?.email}</strong></span>
+              <span className="hidden sm:inline text-slate-600">•</span>
+              <span className="flex items-center gap-1.5">
+                <span>Google Sheet:</span>
+                <span className="inline-flex items-center gap-1 font-mono text-[#b19cd9] font-bold bg-[#0b0f19] px-2 py-0.5 rounded-lg border border-[#232f4b] text-[11px]">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                  {settings.sheetName || 'APMERCH_DATABASE'}
+                </span>
+              </span>
+            </div>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
+              activeTab === 'settings'
+                ? 'bg-[#7c5cb7] border-[#9381ff] text-white shadow-md shadow-[#7c5cb7]/30'
+                : 'bg-[#131b2e] hover:bg-[#1e1b4b] border-[#232f4b] text-[#b19cd9]'
+            }`}
+            title="Configure header branding, capsule texts, logos and schedule"
+          >
+            <SettingsIcon className="w-3.5 h-3.5" />
+            <span>⚙️ Settings &amp; Branding</span>
+          </button>
+
           <button
             onClick={handleManualSync}
             disabled={isSyncing}
@@ -460,31 +570,54 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-[#232f4b] pb-2 overflow-x-auto scrollbar-none text-xs font-bold uppercase tracking-wider">
+      {/* Mobile Tab Select Dropdown (Ensures Settings is instantly accessible on mobile) */}
+      <div className="md:hidden">
+        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+          Active Section:
+        </label>
+        <select
+          value={activeTab}
+          onChange={(e) => setActiveTab(e.target.value as any)}
+          className="w-full px-3.5 py-2.5 bg-[#131b2e] border border-[#7c5cb7]/60 rounded-xl text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#9381ff]"
+        >
+          <option value="overview">📊 Overview &amp; Metrics</option>
+          <option value="orders">📦 Orders ({orders.length})</option>
+          <option value="products">🛍️ Official Merch Capsule ({products.length})</option>
+          <option value="collections">🗂️ Exclusive Collections ({collections.length})</option>
+          <option value="fanprojects">💖 Panay Community ({fanProjects.length})</option>
+          <option value="library">📖 KAAL Library ({teamKaalItems.length})</option>
+          <option value="sheets">📊 Google Sheets Integration</option>
+          <option value="emails">✉️ Email Logs ({emailLogs.length})</option>
+          <option value="settings">⚙️ Editable Settings, Logos &amp; Capsule</option>
+        </select>
+      </div>
+
+      {/* Navigation Tabs (Responsive Wrap Bar with clean badges - never cuts off) */}
+      <div className="hidden md:flex flex-wrap items-center gap-2 border-b border-[#232f4b] pb-3 text-xs font-bold uppercase tracking-wider">
         {[
           { key: 'overview', label: 'Overview & Metrics', icon: TrendingUp },
           { key: 'orders', label: `Orders (${orders.length})`, icon: Package },
-          { key: 'products', label: `Official Merch Capsule (${products.length})`, icon: ShoppingBag },
-          { key: 'collections', label: `Exclusive Collections (${collections.length})`, icon: Layers },
+          { key: 'products', label: `Merch Capsule (${products.length})`, icon: ShoppingBag },
+          { key: 'collections', label: `Collections (${collections.length})`, icon: Layers },
           { key: 'fanprojects', label: `Panay Community (${fanProjects.length})`, icon: Heart },
           { key: 'library', label: `KAAL Library (${teamKaalItems.length})`, icon: BookOpen },
-          { key: 'sheets', label: 'Google Sheets Integration', icon: FileSpreadsheet },
+          { key: 'sheets', label: 'Google Sheets Sync', icon: FileSpreadsheet },
           { key: 'emails', label: `Email Logs (${emailLogs.length})`, icon: Mail },
-          { key: 'settings', label: 'Editable Settings & Logos', icon: SettingsIcon },
+          { key: 'settings', label: '⚙️ Settings & Capsule', icon: SettingsIcon },
         ].map(tab => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.key}
+              type="button"
               onClick={() => setActiveTab(tab.key as any)}
-              className={`px-4 py-2.5 rounded-xl whitespace-nowrap flex items-center gap-2 transition-all ${
+              className={`px-3.5 py-2 rounded-xl whitespace-nowrap flex items-center gap-2 transition-all ${
                 activeTab === tab.key
                   ? 'bg-gradient-to-r from-[#7c5cb7] to-[#9381ff] text-white shadow-md shadow-[#7c5cb7]/30'
-                  : 'text-slate-400 hover:text-white hover:bg-[#131b2e]'
+                  : 'text-slate-400 hover:text-white hover:bg-[#131b2e] border border-transparent hover:border-[#232f4b]'
               }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="w-4 h-4 shrink-0" />
               <span>{tab.label}</span>
             </button>
           );
@@ -583,6 +716,51 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
+          {/* Quick Admin Navigation Shortcuts */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div 
+              onClick={() => setActiveTab('settings')}
+              className="p-5 rounded-2xl bg-[#131b2e] hover:bg-[#1a233b] border border-[#232f4b] hover:border-[#7c5cb7] cursor-pointer transition-all space-y-2 group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#b19cd9]">Branding &amp; Capsule</span>
+                <SettingsIcon className="w-5 h-5 text-[#9381ff] group-hover:rotate-45 transition-transform" />
+              </div>
+              <h4 className="text-sm font-black text-white">⚙️ Editable Settings &amp; Logos</h4>
+              <p className="text-xs text-slate-400">
+                Change header logo, brand names, capsule text badges, schedules, and lock them in permanently.
+              </p>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('products')}
+              className="p-5 rounded-2xl bg-[#131b2e] hover:bg-[#1a233b] border border-[#232f4b] hover:border-[#f472b6] cursor-pointer transition-all space-y-2 group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#f472b6]">Inventory &amp; Merch</span>
+                <ShoppingBag className="w-5 h-5 text-[#f472b6] group-hover:scale-110 transition-transform" />
+              </div>
+              <h4 className="text-sm font-black text-white">🛍️ Official Merch Capsule ({products.length})</h4>
+              <p className="text-xs text-slate-400">
+                Add, edit prices, update gallery angles and manage sizes for all merchandise items.
+              </p>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('orders')}
+              className="p-5 rounded-2xl bg-[#131b2e] hover:bg-[#1a233b] border border-[#232f4b] hover:border-emerald-500 cursor-pointer transition-all space-y-2 group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Order Verification</span>
+                <Package className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
+              </div>
+              <h4 className="text-sm font-black text-white">📦 Review Orders ({orders.length})</h4>
+              <p className="text-xs text-slate-400">
+                Verify customer GCash/bank payment receipts and mark ready for pickup.
+              </p>
+            </div>
+          </div>
+
         </div>
       )}
 
@@ -604,8 +782,18 @@ export const AdminDashboard: React.FC = () => {
               />
             </div>
 
-            {/* Filter */}
+            {/* Filter & Add Order */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <button
+                onClick={() => setShowAddOrderModal(true)}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#7c5cb7] to-[#f472b6] text-white text-xs font-bold flex items-center gap-1.5 shadow-md hover:opacity-95 transition-opacity shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Add Manual Order</span>
+              </button>
+
+              <div className="h-5 w-px bg-[#232f4b] mx-1 shrink-0" />
+
               <Filter className="w-4 h-4 text-slate-400 shrink-0" />
               {(['All', 'Pending Payment', 'Under Verification', 'Paid', 'Ready For Pickup', 'Claimed', 'Cancelled'] as ('All' | OrderStatus)[]).map(st => (
                 <button
@@ -638,75 +826,100 @@ export const AdminDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#232f4b]/60">
-                  {filteredOrders.map(order => (
-                    <tr key={order.id} className="hover:bg-[#1e1b4b]/30 transition-colors">
-                      <td className="px-4 py-3.5 space-y-0.5">
-                        <div className="font-mono font-black text-white">{order.orderNumber}</div>
-                        <div className="font-mono text-[10px] text-[#b19cd9]">Conf: {order.confirmationNumber}</div>
-                        <div className="text-[10px] text-slate-500">{order.createdAt.split('T')[0]}</div>
-                      </td>
-
-                      <td className="px-4 py-3.5 space-y-0.5">
-                        <div className="font-bold text-white">{order.customerName}</div>
-                        <div className="text-[11px] text-slate-400">{order.customerEmail}</div>
-                        <div className="text-[10px] text-slate-500">{order.customerMobile}</div>
-                      </td>
-
-                      <td className="px-4 py-3.5 space-y-1">
-                        {order.items.map((it, idx) => (
-                          <div key={idx} className="text-xs">
-                            <span className="font-bold text-[#f472b6]">{it.quantity}x</span> {it.productTitle}
-                            {it.variant?.size && (
-                              <span className="ml-1 px-1.5 py-0.2 rounded bg-[#0b0f19] border border-[#232f4b] text-[10px] font-bold text-white">
-                                {it.variant.size}
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </td>
-
-                      <td className="px-4 py-3.5 space-y-1">
-                        <div className="font-black text-[#f472b6] font-mono text-sm">
-                          ₱{order.totalAmount.toLocaleString()}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {order.paymentMethod} • Ref: <span className="font-mono text-slate-200">{order.paymentReferenceNumber || 'N/A'}</span>
-                        </div>
-                        {order.paymentProofUrl && (
-                          <button
-                            onClick={() => setSelectedProofOrder(order)}
-                            className="text-[10px] text-[#b19cd9] hover:underline font-semibold flex items-center gap-1"
-                          >
-                            <Eye className="w-3 h-3" /> View Receipt
-                          </button>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3.5">
-                        <select
-                          value={order.status}
-                          onChange={e => updateOrderStatus(order.orderNumber, e.target.value as OrderStatus)}
-                          className="px-2.5 py-1 rounded-lg bg-[#0b0f19] border border-[#232f4b] text-xs font-bold text-white focus:outline-none focus:border-[#7c5cb7]"
-                        >
-                          <option value="Pending Payment">Pending Payment</option>
-                          <option value="Under Verification">Under Verification</option>
-                          <option value="Paid">Paid (Verified)</option>
-                          <option value="Ready For Pickup">Ready For Pickup</option>
-                          <option value="Claimed">Claimed</option>
-                          <option value="Cancelled">Cancelled</option>
-                        </select>
-                      </td>
-
-                      <td className="px-4 py-3.5 text-right space-x-1.5">
-                        <button
-                          onClick={() => openModal('e-ticket', { order })}
-                          className="px-2.5 py-1 rounded-lg bg-[#1e1b4b] hover:bg-[#2d1b69] border border-[#3b2b73] text-[11px] font-bold text-[#e0d7f5]"
-                        >
-                          Ticket
-                        </button>
+                  {filteredOrders.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        No orders found matching the filter or search query.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredOrders.map(order => (
+                      <tr key={order.id} className="hover:bg-[#1e1b4b]/30 transition-colors">
+                        <td className="px-4 py-3.5 space-y-0.5">
+                          <div className="font-mono font-black text-white">{order.orderNumber}</div>
+                          <div className="font-mono text-[10px] text-[#b19cd9]">Conf: {order.confirmationNumber}</div>
+                          <div className="text-[10px] text-slate-500">{order.createdAt.split('T')[0]}</div>
+                        </td>
+
+                        <td className="px-4 py-3.5 space-y-0.5">
+                          <div className="font-bold text-white">{order.customerName}</div>
+                          <div className="text-[11px] text-slate-400">{order.customerEmail}</div>
+                          <div className="text-[10px] text-slate-500">{order.customerMobile}</div>
+                        </td>
+
+                        <td className="px-4 py-3.5 space-y-1">
+                          {order.items.map((it, idx) => (
+                            <div key={idx} className="text-xs">
+                              <span className="font-bold text-[#f472b6]">{it.quantity}x</span> {it.productTitle}
+                              {it.variant?.size && (
+                                <span className="ml-1 px-1.5 py-0.2 rounded bg-[#0b0f19] border border-[#232f4b] text-[10px] font-bold text-white">
+                                  {it.variant.size}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </td>
+
+                        <td className="px-4 py-3.5 space-y-1">
+                          <div className="font-black text-[#f472b6] font-mono text-sm">
+                            ₱{order.totalAmount.toLocaleString()}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {order.paymentMethod} • Ref: <span className="font-mono text-slate-200">{order.paymentReferenceNumber || 'N/A'}</span>
+                          </div>
+                          {order.paymentProofUrl && (
+                            <button
+                              onClick={() => setSelectedProofOrder(order)}
+                              className="text-[10px] text-[#b19cd9] hover:underline font-semibold flex items-center gap-1"
+                            >
+                              <Eye className="w-3 h-3" /> View Receipt
+                            </button>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3.5">
+                          <select
+                            value={order.status}
+                            onChange={e => updateOrderStatus(order.orderNumber, e.target.value as OrderStatus)}
+                            className="px-2.5 py-1 rounded-lg bg-[#0b0f19] border border-[#232f4b] text-xs font-bold text-white focus:outline-none focus:border-[#7c5cb7]"
+                          >
+                            <option value="Pending Payment">Pending Payment</option>
+                            <option value="Under Verification">Under Verification</option>
+                            <option value="Paid">Paid (Verified)</option>
+                            <option value="Ready For Pickup">Ready For Pickup</option>
+                            <option value="Claimed">Claimed</option>
+                            <option value="Cancelled">Cancelled</option>
+                          </select>
+                        </td>
+
+                        <td className="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                          <button
+                            onClick={() => openModal('e-ticket', { order })}
+                            className="px-2.5 py-1 rounded-lg bg-[#1e1b4b] hover:bg-[#2d1b69] border border-[#3b2b73] text-[11px] font-bold text-[#e0d7f5] transition-colors"
+                            title="View E-Ticket"
+                          >
+                            Ticket
+                          </button>
+                          <button
+                            onClick={() => setEditingOrder(order)}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-900/40 hover:bg-indigo-900/70 border border-indigo-700/50 text-[11px] font-bold text-indigo-200 transition-colors inline-flex items-center gap-1"
+                            title="Edit Order Details & Items"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            onClick={() => setDeletingOrder(order)}
+                            className="px-2.5 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-[11px] font-bold text-rose-300 transition-colors inline-flex items-center gap-1"
+                            title="Delete Order"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Delete</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -725,7 +938,7 @@ export const AdminDashboard: React.FC = () => {
               </p>
             </div>
             <button
-              onClick={handleOpenAddProduct}
+              onClick={() => handleOpenAddProduct()}
               className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#7c5cb7] to-[#9381ff] text-white text-xs font-bold shadow-md flex items-center gap-1.5"
             >
               <Plus className="w-4 h-4" />
@@ -984,8 +1197,8 @@ export const AdminDashboard: React.FC = () => {
 
       {/* TAB 6: SETTINGS */}
       {activeTab === 'settings' && (
-        <form onSubmit={handleSaveSettings} className="space-y-6 max-w-4xl">
-          {/* Event Configuration */}
+        <div className="space-y-6 max-w-4xl">
+          {/* Event & Pre-Order Schedule Configuration */}
           <div className="p-6 rounded-2xl bg-[#131b2e] border border-[#232f4b] space-y-4">
             <div className="flex items-center justify-between border-b border-[#232f4b] pb-3">
               <div>
@@ -994,29 +1207,98 @@ export const AdminDashboard: React.FC = () => {
                   <span>Event & Pre-Order Schedule</span>
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Configure pre-order cutoffs, pickup schedules, and venue information for customer tickets.
+                  Configure the pre-order timeline, live countdown deadlines, status overrides, descriptions, and venue information.
                 </p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-              <div>
+              
+              {/* Pre-Order Status Mode */}
+              <div className="sm:col-span-2">
                 <label className="block font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-[#f472b6]" />
-                  <span>Pre-order Deadline (Cut-off Date)</span>
+                  <Sparkles className="w-3.5 h-3.5 text-[#f472b6]" />
+                  <span>Pre-Order Window Status Mode</span>
                 </label>
-                <input
-                  type="date"
-                  value={preorderDeadline}
-                  onChange={e => setPreorderDeadline(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white focus:outline-none focus:border-[#7c5cb7]"
-                />
+                <select
+                  value={preorderStatusManual}
+                  onChange={e => setPreorderStatusManual(e.target.value as 'auto' | 'open' | 'closed')}
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white font-semibold focus:outline-none focus:border-[#7c5cb7]"
+                >
+                  <option value="auto">Automatic (Live countdown based on deadline cutoff date)</option>
+                  <option value="open">Force OPEN (Pre-order window open and active)</option>
+                  <option value="closed">Force CLOSED (Pre-order window sealed / in production queue)</option>
+                </select>
               </div>
 
+              {/* Pre-order Window Display Text */}
               <div>
                 <label className="block font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-[#f472b6]" />
-                  <span>Event Pickup Date</span>
+                  <span>Pre-Order Window Display Text</span>
+                </label>
+                <input
+                  type="text"
+                  value={preorderWindowText}
+                  onChange={e => setPreorderWindowText(e.target.value)}
+                  placeholder="Sept 1 – Sept 20, 2026"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white focus:outline-none focus:border-[#7c5cb7]"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Shown on countdown badges, header banners, and order confirmation.
+                </span>
+              </div>
+
+              {/* Pre-order Deadline */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-[#f472b6]" />
+                  <span>Pre-order Cut-off Deadline (Date &amp; Time)</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={preorderDeadline}
+                    onChange={e => setPreorderDeadline(e.target.value)}
+                    placeholder="2026-09-20T23:59:59+08:00"
+                    className="flex-1 px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white font-mono focus:outline-none focus:border-[#7c5cb7]"
+                  />
+                  <input
+                    type="date"
+                    onChange={e => {
+                      if (e.target.value) {
+                        setPreorderDeadline(`${e.target.value}T23:59:59+08:00`);
+                      }
+                    }}
+                    className="px-2 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-slate-400 cursor-pointer text-xs"
+                    title="Pick Date"
+                  />
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  ISO format e.g. <code className="text-[#b19cd9]">2026-09-20T23:59:59+08:00</code> or pick from calendar.
+                </span>
+              </div>
+
+              {/* Pre-order Start Date */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-[#f472b6]" />
+                  <span>Pre-order Start Date (Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={preorderOpenDate}
+                  onChange={e => setPreorderOpenDate(e.target.value)}
+                  placeholder="2026-09-01T00:00:00+08:00"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white font-mono focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              {/* Event Pickup Date */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-[#f472b6]" />
+                  <span>Event Claiming / Pickup Date</span>
                 </label>
                 <input
                   type="text"
@@ -1027,6 +1309,7 @@ export const AdminDashboard: React.FC = () => {
                 />
               </div>
 
+              {/* Pickup Venue & Booth Location */}
               <div className="sm:col-span-2">
                 <label className="block font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
                   <MapPin className="w-3.5 h-3.5 text-[#f472b6]" />
@@ -1040,6 +1323,35 @@ export const AdminDashboard: React.FC = () => {
                   className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white focus:outline-none focus:border-[#7c5cb7]"
                 />
               </div>
+
+              {/* Pre-order Open Description */}
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Announcement Description (When Pre-Order is Open)
+                </label>
+                <textarea
+                  rows={2}
+                  value={preorderOpenDescription}
+                  onChange={e => setPreorderOpenDescription(e.target.value)}
+                  placeholder="Lock in your exclusive A'TIN Panay x Team KAAL BlockScreening merchandise before slots close..."
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              {/* Pre-order Closed Description */}
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Announcement Description (When Pre-Order is Closed)
+                </label>
+                <textarea
+                  rows={2}
+                  value={preorderClosedDescription}
+                  onChange={e => setPreorderClosedDescription(e.target.value)}
+                  placeholder="All slots for this production batch are officially sealed. Orders are now in queue for production and claiming."
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
             </div>
           </div>
 
@@ -1051,19 +1363,60 @@ export const AdminDashboard: React.FC = () => {
             />
           </div>
 
-          {/* Official Logos & Branding (APMERCH_DATAFOLDER/Logos) */}
+          {/* Official Header Branding & Logos */}
           <div className="p-6 rounded-2xl bg-[#131b2e] border border-[#232f4b] space-y-4">
             <div className="border-b border-[#232f4b] pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Folder className="w-5 h-5 text-[#f472b6]" />
-                <span>Logos & Brand Identity (APMERCH_DATAFOLDER/Logos)</span>
+                <span>Header Branding, Logos &amp; Identity</span>
               </h3>
               <p className="text-xs text-slate-400">
-                Custom uploaded logos will be saved to Google Drive and locked in so they never revert to defaults.
+                Customise the top navigation brand name, subtitle badge, and official logo graphics. These update in real time and lock in permanently.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Header Brand Name
+                </label>
+                <input
+                  type="text"
+                  value={headerBrandName}
+                  onChange={e => setHeaderBrandName(e.target.value)}
+                  placeholder="A'TIN PANAY"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white font-bold text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Header Subtitle
+                </label>
+                <input
+                  type="text"
+                  value={headerSubtitle}
+                  onChange={e => setHeaderSubtitle(e.target.value)}
+                  placeholder="Community Hub & Exclusive Merch"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Header Collaboration Badge
+                </label>
+                <input
+                  type="text"
+                  value={headerBadgeText}
+                  onChange={e => setHeaderBadgeText(e.target.value)}
+                  placeholder="x KAAL"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-2">
               <ImageUploadField
                 label="A'TIN Panay Main Community Logo"
                 folder="Logos"
@@ -1083,12 +1436,144 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Homepage & Portal Experience (APMERCH_DATAFOLDER/Homepage) */}
+          {/* Official Merch Capsule (Featured Showcase Section) */}
+          <div className="p-6 rounded-2xl bg-[#131b2e] border border-[#232f4b] space-y-4">
+            <div className="border-b border-[#232f4b] pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <ShoppingBag className="w-5 h-5 text-[#b19cd9]" />
+                <span>A'TIN Panay Official Merch Capsule (Featured Section)</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Edit the text, headlines, badges, and pricing shown on the right-hand hero Merch Capsule card.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Capsule Brand Name
+                </label>
+                <input
+                  type="text"
+                  value={capsuleBrandName}
+                  onChange={e => setCapsuleBrandName(e.target.value)}
+                  placeholder="A'TIN Panay"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white font-bold text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Capsule Subtitle
+                </label>
+                <input
+                  type="text"
+                  value={capsuleSubtitle}
+                  onChange={e => setCapsuleSubtitle(e.target.value)}
+                  placeholder="Official Merch Capsule"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Capsule Top Badge
+                </label>
+                <input
+                  type="text"
+                  value={capsuleBadgeText}
+                  onChange={e => setCapsuleBadgeText(e.target.value)}
+                  placeholder="EXCLUSIVE BATCH"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white font-semibold text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Flagship Drop Badge
+                </label>
+                <input
+                  type="text"
+                  value={capsuleFlagshipBadgeText}
+                  onChange={e => setCapsuleFlagshipBadgeText(e.target.value)}
+                  placeholder="Flagship Drop"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Featured Product Title
+                </label>
+                <input
+                  type="text"
+                  value={capsuleFeaturedTitle}
+                  onChange={e => setCapsuleFeaturedTitle(e.target.value)}
+                  placeholder="BlockScreening T-Shirt (Lavender)"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white font-semibold text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Featured Product Subtitle
+                </label>
+                <input
+                  type="text"
+                  value={capsuleFeaturedSubtitle}
+                  onChange={e => setCapsuleFeaturedSubtitle(e.target.value)}
+                  placeholder="Premium Cotton • Sizes TS to XXL"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Featured Price Text
+                </label>
+                <input
+                  type="text"
+                  value={capsuleFeaturedPriceText}
+                  onChange={e => setCapsuleFeaturedPriceText(e.target.value)}
+                  placeholder="₱550 - ₱580"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white font-bold text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Partnership Marker Text
+                </label>
+                <input
+                  type="text"
+                  value={capsulePartnershipText}
+                  onChange={e => setCapsulePartnershipText(e.target.value)}
+                  placeholder="In partnership with Team KAAL"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Fan Kit Button Label
+                </label>
+                <input
+                  type="text"
+                  value={capsuleFanKitButtonText}
+                  onChange={e => setCapsuleFanKitButtonText(e.target.value)}
+                  placeholder="View Fan Kit"
+                  className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Homepage Hero & Experience (APMERCH_DATAFOLDER/Homepage) */}
           <div className="p-6 rounded-2xl bg-[#131b2e] border border-[#232f4b] space-y-4">
             <div className="border-b border-[#232f4b] pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <ImageIcon className="w-5 h-5 text-[#9381ff]" />
-                <span>Homepage Hero & Experience (APMERCH_DATAFOLDER/Homepage)</span>
+                <span>Homepage Hero &amp; Experience (APMERCH_DATAFOLDER/Homepage)</span>
               </h3>
               <p className="text-xs text-slate-400">
                 Custom hero graphics, banners, and editable community headlines.
@@ -1108,13 +1593,39 @@ export const AdminDashboard: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                 <div>
                   <label className="block font-semibold text-slate-300 mb-1">
+                    Homepage Hero Title
+                  </label>
+                  <input
+                    type="text"
+                    value={homepageHeroTitle}
+                    onChange={e => setHomepageHeroTitle(e.target.value)}
+                    placeholder="A'TIN Panay Community Hub"
+                    className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
                     Homepage Slogan / Tagline
                   </label>
                   <input
                     type="text"
                     value={homepageTagline}
                     onChange={e => setHomepageTagline(e.target.value)}
-                    placeholder="Official Panay Merch Capsule & Team KAAL Corner"
+                    placeholder="BlockScreening Exclusive Merchandise"
+                    className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Homepage Description Paragraph
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={homepageDescription}
+                    onChange={e => setHomepageDescription(e.target.value)}
+                    placeholder="Official merchandise, fan projects, collections, stories and community updates for A'TIN Panay."
                     className="w-full px-3 py-2 bg-[#0b0f19] border border-[#232f4b] rounded-xl text-white text-xs focus:outline-none focus:border-[#7c5cb7]"
                   />
                 </div>
@@ -1275,14 +1786,15 @@ export const AdminDashboard: React.FC = () => {
               Changes will be permanently locked in to APMERCH_DATABASE and your Google Drive structure.
             </p>
             <button
-              type="submit"
+              type="button"
+              onClick={handleSaveSettings}
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#7c5cb7] to-[#9381ff] text-white text-xs font-bold shadow-lg shadow-[#7c5cb7]/25 hover:opacity-95 flex items-center gap-2"
             >
               <Save className="w-4 h-4" />
               <span>Save & Lock In All Settings</span>
             </button>
           </div>
-        </form>
+        </div>
       )}
 
       {/* Add / Edit Product Modal */}
@@ -1549,6 +2061,41 @@ export const AdminDashboard: React.FC = () => {
         onConfirm={handleConfirmLockSettings}
         onCancel={() => setShowSettingsLockModal(false)}
       />
+
+      {/* Admin Order Create / Edit Modal */}
+      {(showAddOrderModal || editingOrder) && (
+        <AdminOrderModal
+          isOpen={showAddOrderModal || !!editingOrder}
+          initialOrder={editingOrder}
+          products={products}
+          onClose={() => {
+            setShowAddOrderModal(false);
+            setEditingOrder(null);
+          }}
+          onSave={async (orderData) => {
+            if (editingOrder) {
+              await updateOrder(orderData);
+            } else {
+              await addAdminOrder(orderData);
+            }
+          }}
+        />
+      )}
+
+      {/* Admin Order Delete Confirmation Modal */}
+      {deletingOrder && (
+        <AdminOrderDeleteModal
+          isOpen={!!deletingOrder}
+          order={deletingOrder}
+          onClose={() => setDeletingOrder(null)}
+          onConfirm={async () => {
+            if (deletingOrder) {
+              await deleteOrder(deletingOrder.orderNumber);
+              setDeletingOrder(null);
+            }
+          }}
+        />
+      )}
 
     </div>
   );

@@ -22,6 +22,7 @@ import {
 import confetti from 'canvas-confetti';
 import { Order, PaymentMethodConfig } from '../types';
 import { INITIAL_PAYMENT_METHODS } from '../data/initialData';
+import { optimizeImageFile, isImageFile } from '../utils/imageOptimizer';
 
 export const CheckoutModal: React.FC = () => {
   const { 
@@ -95,47 +96,24 @@ export const CheckoutModal: React.FC = () => {
   };
 
   // Image upload to base64 preview
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 8 * 1024 * 1024) {
-      addToast('error', 'File Too Large', 'Please upload a receipt under 8MB.');
+    if (!isImageFile(file)) {
+      addToast('error', 'Invalid File', 'Please upload a valid image file (JPG, PNG, WEBP, etc.).');
       return;
     }
 
     setProofFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 1200;
-        let { width, height } = img;
-
-        if (width > height && width > maxDim) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else if (height > maxDim) {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const optimized = canvas.toDataURL('image/jpeg', 0.85);
-          setPaymentProofUrl(optimized);
-        } else {
-          setPaymentProofUrl(uploadEvent.target?.result as string);
-        }
-        addToast('success', 'Receipt Attached', 'Payment proof loaded successfully.');
-      };
-      img.src = uploadEvent.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+    try {
+      const optimized = await optimizeImageFile(file, { maxDimension: 1200, quality: 0.85 });
+      setPaymentProofUrl(optimized);
+      addToast('success', 'Receipt Attached', 'Payment proof loaded successfully.');
+    } catch (err: any) {
+      console.error('Error processing receipt:', err);
+      addToast('error', 'Processing Error', err.message || 'Could not process receipt image.');
+    }
   };
 
   const handleProceedToPayment = (e: React.FormEvent) => {

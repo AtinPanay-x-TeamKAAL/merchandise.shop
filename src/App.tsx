@@ -115,8 +115,8 @@ const MainLayout: React.FC = () => {
             {toast.type === 'info' && <Info className="w-5 h-5 text-purple-300 shrink-0 mt-0.5" />}
 
             <div className="flex-1 space-y-0.5">
-              <div className="text-xs font-bold leading-tight">{toast.title}</div>
-              <div className="text-[11px] opacity-90 leading-relaxed">{toast.message}</div>
+              <div className="text-xs font-bold leading-tight">{typeof toast.title === 'string' ? toast.title : String(toast.title || '')}</div>
+              <div className="text-[11px] opacity-90 leading-relaxed">{typeof toast.message === 'string' ? toast.message : String(toast.message || '')}</div>
             </div>
 
             <button

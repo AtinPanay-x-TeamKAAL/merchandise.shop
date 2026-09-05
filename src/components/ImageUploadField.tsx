@@ -1,6 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Link as LinkIcon, Image as ImageIcon, Trash2, CheckCircle, Folder, Loader2 } from 'lucide-react';
+import { Upload, Link as LinkIcon, Image as ImageIcon, Trash2, CheckCircle, Folder, Loader2, AlertCircle } from 'lucide-react';
 import { googleSheetsApi } from '../services/googleSheetsApi';
+import { optimizeImageFile, isImageFile } from '../utils/imageOptimizer';
+
+export { optimizeImageFile };
 
 export type DriveFolder = 'Payment_Qr' | 'Logos' | 'Merchandise' | 'Collection' | 'FanProjects' | 'Homepage' | 'TeamKAAL';
 
@@ -13,71 +16,6 @@ interface ImageUploadFieldProps {
   aspectRatio?: 'square' | 'video' | 'banner' | 'auto';
   required?: boolean;
 }
-
-/**
- * Optimizes an uploaded image file (JPG, PNG, WEBP) via Canvas client-side
- * to ensure high quality while reducing payload size for Google Sheets & Drive.
- */
-export const optimizeImageFile = (
-  file: File, 
-  maxDimension = 1100, 
-  quality = 0.82
-): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    if (!file.type.match(/image\/(jpeg|png|webp|jpg|gif)/i)) {
-      reject(new Error('Unsupported file format. Please upload JPG, PNG, or WEBP images.'));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-
-        // Keep alpha for png if needed, or use compressed webp/jpeg
-        if (file.type.includes('png')) {
-          try {
-            const webp = canvas.toDataURL('image/webp', quality);
-            if (webp.startsWith('data:image/webp')) {
-              resolve(webp);
-              return;
-            }
-          } catch {}
-          resolve(canvas.toDataURL('image/png'));
-        } else {
-          resolve(canvas.toDataURL('image/jpeg', quality));
-        }
-      };
-      img.onerror = () => reject(new Error('Could not parse image file.'));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => reject(new Error('Failed to read file from disk.'));
-    reader.readAsDataURL(file);
-  });
-};
 
 export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
   label,
@@ -93,25 +31,51 @@ export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [urlInput, setUrlInput] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileProcess = async (file: File) => {
+    if (!file) return;
+
+    if (!isImageFile(file)) {
+      setErrorMessage('Please select a valid image file (JPG, PNG, WEBP, GIF, SVG, etc.).');
+      setTimeout(() => setErrorMessage(null), 4000);
+      return;
+    }
+
     setIsProcessing(true);
+    setErrorMessage(null);
     setStatusMessage('Optimizing photo...');
+
     try {
-      const optimized = await optimizeImageFile(file);
-      setStatusMessage(`Uploading to APMERCH_DATAFOLDER/${folder}...`);
+      const optimized = await optimizeImageFile(file, {
+        maxDimension: folder === 'Homepage' ? 1600 : folder === 'Logos' ? 800 : 1200,
+        quality: 0.86
+      });
+
+      setStatusMessage(`Saving photo to APMERCH_DATAFOLDER/${folder}...`);
       
       // Attempt upload to Google Drive if Apps Script is configured
-      const finalUrl = await googleSheetsApi.uploadImage(optimized, file.name, folder);
+      let finalUrl = optimized;
+      try {
+        finalUrl = await googleSheetsApi.uploadImage(optimized, file.name, folder);
+      } catch (uploadErr) {
+        console.warn('Drive upload fallback notice:', uploadErr);
+        finalUrl = optimized;
+      }
+
       onChange(finalUrl);
-      setStatusMessage('Photo saved and ready to lock in!');
+      setStatusMessage('Photo loaded and ready to lock in!');
       setTimeout(() => setStatusMessage(null), 3000);
     } catch (err: any) {
       console.error('Image processing failed:', err);
-      setStatusMessage(err.message || 'Image processing failed');
+      setErrorMessage(err.message || 'Image processing failed. Please try another image.');
+      setTimeout(() => setErrorMessage(null), 5000);
     } finally {
       setIsProcessing(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -120,6 +84,16 @@ export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFileProcess(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (e.clipboardData && e.clipboardData.files && e.clipboardData.files[0]) {
+      const file = e.clipboardData.files[0];
+      if (isImageFile(file)) {
+        e.preventDefault();
+        handleFileProcess(file);
+      }
     }
   };
 
@@ -141,7 +115,7 @@ export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" onPaste={handlePaste}>
       <div className="flex items-center justify-between">
         <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
           <span>{label}</span>
@@ -188,11 +162,12 @@ export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
       {/* Upload Box or URL Input */}
       {tab === 'upload' ? (
         <div
+          tabIndex={0}
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`cursor-pointer border-2 border-dashed rounded-xl p-4 text-center transition-all flex flex-col items-center justify-center gap-2 ${
+          className={`cursor-pointer border-2 border-dashed rounded-xl p-4 text-center transition-all flex flex-col items-center justify-center gap-2 outline-none focus:border-[#7c5cb7] ${
             isDragging
               ? 'border-[#f472b6] bg-[#7c5cb7]/15'
               : 'border-[#232f4b] hover:border-[#7c5cb7] bg-[#0b0f19]/80'
@@ -201,7 +176,7 @@ export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/jpg"
+            accept="image/*"
             className="hidden"
             onChange={(e) => {
               if (e.target.files && e.target.files[0]) {
@@ -220,8 +195,8 @@ export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
                 <Upload className="w-4 h-4" />
               </div>
               <div className="text-xs">
-                <span className="font-bold text-white">Click to upload photo</span> or drag & drop
-                <p className="text-[10px] text-slate-400 mt-0.5">JPG, PNG, or WEBP (Optimized for Drive & Sheets)</p>
+                <span className="font-bold text-white">Click to upload photo</span>, drag & drop, or paste (Ctrl+V)
+                <p className="text-[10px] text-slate-400 mt-0.5">Supports JPG, PNG, WEBP, GIF, SVG, AVIF (Auto-optimized)</p>
               </div>
             </>
           )}
@@ -242,6 +217,13 @@ export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
           >
             Apply
           </button>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="flex items-center gap-1.5 text-[11px] text-rose-400 font-medium bg-rose-950/30 p-2 rounded-lg border border-rose-500/30">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span>{errorMessage}</span>
         </div>
       )}
 

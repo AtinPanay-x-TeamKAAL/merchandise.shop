@@ -67,20 +67,24 @@ export const HeroBanner: React.FC = () => {
             {/* Main Heading: Large Typography */}
             <div className="space-y-2 max-w-full overflow-hidden">
               <h1 className="text-3xl sm:text-5xl lg:text-6xl xl:text-7xl font-black text-slate-900 tracking-tight leading-[1.1] break-words">
-                A'TIN Panay{' '}
-                <span className="block bg-gradient-to-r from-purple-700 via-indigo-600 to-pink-600 bg-clip-text text-transparent">
-                  Community Hub
-                </span>
+                {settings.homepageHeroTitle || (
+                  <>
+                    {settings.headerBrandName || "A'TIN Panay"}{' '}
+                    <span className="block bg-gradient-to-r from-purple-700 via-indigo-600 to-pink-600 bg-clip-text text-transparent">
+                      Community Hub
+                    </span>
+                  </>
+                )}
               </h1>
               
               <div className="inline-block px-3.5 py-1 rounded-xl bg-purple-100/70 border border-purple-200/70 text-xs sm:text-sm font-bold text-purple-900 tracking-wide">
-                BlockScreening Exclusive Merchandise
+                {settings.homepageTagline || "BlockScreening Exclusive Merchandise"}
               </div>
             </div>
 
             {/* Subtitle */}
             <p className="text-base sm:text-lg text-slate-600 max-w-2xl leading-relaxed font-normal">
-              Official merchandise, fan projects, collections, stories and community updates for A'TIN Panay.
+              {settings.homepageDescription || "Official merchandise, fan projects, collections, stories and community updates for A'TIN Panay."}
             </p>
 
             {/* Event Key Details - Clean Glassmorphism Cards */}
@@ -163,23 +167,36 @@ export const HeroBanner: React.FC = () => {
                 {/* Floating Top Collaboration Badge */}
                 <div className="flex items-center justify-between border-b border-purple-100 pb-3.5 mb-4">
                   <div className="flex items-center gap-2">
-                    <PanayEmblem size={28} />
+                    {settings.logoUrl ? (
+                      <img 
+                        src={settings.logoUrl} 
+                        alt="Emblem" 
+                        className="w-7 h-7 rounded-full object-cover border border-purple-200"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <PanayEmblem size={28} />
+                    )}
                     <div className="text-left">
-                      <div className="text-xs font-black text-slate-900">A'TIN Panay</div>
-                      <div className="text-[10px] text-purple-600 font-semibold">Official Merch Capsule</div>
+                      <div className="text-xs font-black text-slate-900">
+                        {settings.capsuleBrandName || settings.headerBrandName || "A'TIN Panay"}
+                      </div>
+                      <div className="text-[10px] text-purple-600 font-semibold">
+                        {settings.capsuleSubtitle || "Official Merch Capsule"}
+                      </div>
                     </div>
                   </div>
                   
                   <div className="px-3 py-1 rounded-full bg-pink-50 border border-pink-200 text-[10px] font-black text-pink-700 flex items-center gap-1">
                     <Sparkles className="w-3 h-3 text-pink-500" />
-                    EXCLUSIVE BATCH
+                    {settings.capsuleBadgeText || "EXCLUSIVE BATCH"}
                   </div>
                 </div>
 
                 {/* Primary Hero Showcase Card (Lavender Shirt) */}
                 <div 
                   onClick={() => {
-                    const shirt = products.find(p => p.id === 'prod_shirt');
+                    const shirt = products.find(p => p.id === 'prod_shirt' || p.category === 'Apparel');
                     if (shirt) openModal('product-detail', { product: shirt });
                   }}
                   className="relative aspect-[4/3] rounded-2xl overflow-hidden bg-gradient-to-tr from-purple-100 via-pink-50 to-indigo-100 border border-purple-100 cursor-pointer group/card"
@@ -193,19 +210,23 @@ export const HeroBanner: React.FC = () => {
                   
                   <div className="absolute top-3 left-3">
                     <span className="px-2.5 py-1 rounded-lg bg-white/90 backdrop-blur-md text-[10px] font-extrabold text-purple-900 shadow-sm">
-                      Flagship Drop
+                      {settings.capsuleFlagshipBadgeText || "Flagship Drop"}
                     </span>
                   </div>
 
                   <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between text-white">
                     <div>
                       <h3 className="text-base sm:text-lg font-black drop-shadow-md">
-                        BlockScreening T-Shirt (Lavender)
+                        {settings.capsuleFeaturedTitle || "BlockScreening T-Shirt (Lavender)"}
                       </h3>
-                      <p className="text-xs text-purple-200 font-medium">Premium Cotton • Sizes TS to XXL</p>
+                      <p className="text-xs text-purple-200 font-medium">
+                        {settings.capsuleFeaturedSubtitle || "Premium Cotton • Sizes TS to XXL"}
+                      </p>
                     </div>
                     <div className="text-right">
-                      <div className="text-base sm:text-lg font-black text-pink-400">₱550 - ₱580</div>
+                      <div className="text-base sm:text-lg font-black text-pink-400">
+                        {settings.capsuleFeaturedPriceText || "₱550 - ₱580"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -214,7 +235,7 @@ export const HeroBanner: React.FC = () => {
                 <div className="grid grid-cols-2 gap-3 mt-3">
                   <div 
                     onClick={() => {
-                      const tumbler = products.find(p => p.id === 'prod_tumbler');
+                      const tumbler = products.find(p => p.id === 'prod_tumbler' || p.category === 'Drinkware');
                       if (tumbler) openModal('product-detail', { product: tumbler });
                     }}
                     className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-purple-50/70 hover:bg-purple-100/80 border border-purple-100 cursor-pointer transition-all hover:scale-[1.02]"
@@ -232,7 +253,7 @@ export const HeroBanner: React.FC = () => {
 
                   <div 
                     onClick={() => {
-                      const banner = products.find(p => p.id === 'prod_banner');
+                      const banner = products.find(p => p.id === 'prod_banner' || p.category === 'Merchandise');
                       if (banner) openModal('product-detail', { product: banner });
                     }}
                     className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-purple-50/70 hover:bg-purple-100/80 border border-purple-100 cursor-pointer transition-all hover:scale-[1.02]"
@@ -252,14 +273,23 @@ export const HeroBanner: React.FC = () => {
                 {/* Team KAAL Collaboration Marker */}
                 <div className="mt-3.5 pt-3 border-t border-purple-100 flex items-center justify-between text-xs">
                   <div className="flex items-center gap-1.5 text-slate-600 font-medium">
-                    <KaalLogo size={20} />
-                    <span>In partnership with Team KAAL</span>
+                    {settings.teamKaalLogoUrl ? (
+                      <img 
+                        src={settings.teamKaalLogoUrl} 
+                        alt="KAAL" 
+                        className="w-5 h-5 rounded-full object-cover border border-white"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <KaalLogo size={20} />
+                    )}
+                    <span>{settings.capsulePartnershipText || "In partnership with Team KAAL"}</span>
                   </div>
                   <button
                     onClick={() => setActiveView('team-kaal-corner')}
                     className="text-purple-700 font-bold hover:underline flex items-center gap-0.5"
                   >
-                    <span>View Fan Kit</span>
+                    <span>{settings.capsuleFanKitButtonText || "View Fan Kit"}</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>

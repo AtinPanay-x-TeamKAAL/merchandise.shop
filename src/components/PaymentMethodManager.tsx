@@ -22,6 +22,7 @@ import {
   Folder
 } from 'lucide-react';
 import { googleSheetsApi } from '../services/googleSheetsApi';
+import { optimizeImageFile, isImageFile } from '../utils/imageOptimizer';
 
 interface PaymentMethodManagerProps {
   methods: PaymentMethodConfig[];
@@ -37,50 +38,6 @@ const PRESET_PROVIDERS = [
   { name: 'GoTyme Bank', type: 'digital-bank', defaultInstructions: 'Transfer via GoTyme / InstaPay to designated account.' },
   { name: 'SeaBank', type: 'digital-bank', defaultInstructions: 'Direct SeaBank or QRPh transfer.' }
 ];
-
-/**
- * Optimizes uploaded QR code images (JPG, PNG, WEBP)
- */
-const optimizeQrCodeImage = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 800; // QR codes only need crisp 800px max
-        let { width, height } = img;
-
-        if (width > height && width > maxDim) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else if (height > maxDim) {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
-
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, 0, width, height);
-
-        const optimized = canvas.toDataURL('image/jpeg', 0.9);
-        resolve(optimized);
-      };
-      img.onerror = () => reject(new Error('Failed to parse QR code image'));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => reject(new Error('Failed to read QR file'));
-    reader.readAsDataURL(file);
-  });
-};
 
 export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
   methods,
@@ -143,18 +100,19 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
   const handleQrFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const file = files[0];
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload a valid JPG, PNG, or WEBP image.');
+    if (!isImageFile(file)) {
+      alert('Please upload a valid image file (JPG, PNG, WEBP, etc.).');
       return;
     }
 
     try {
       setIsUploadingQr(true);
-      const optimizedUrl = await optimizeQrCodeImage(file);
+      const optimizedUrl = await optimizeImageFile(file, { maxDimension: 900, quality: 0.9 });
       let finalUrl = optimizedUrl;
       try {
         finalUrl = await googleSheetsApi.uploadImage(optimizedUrl, file.name, 'Payment_Qr');
-      } catch {
+      } catch (uploadErr) {
+        console.warn('Drive QR upload fallback to data URL:', uploadErr);
         finalUrl = optimizedUrl;
       }
       setFormQrCodeUrl(finalUrl);
@@ -166,8 +124,10 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
     }
   };
 
-  const handleSaveMethod = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveMethod = (e?: React.FormEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     if (!formName.trim() || !formAccountName.trim() || !formAccountNumber.trim()) {
       alert('Please provide payment method name, account name, and account number.');
       return;
@@ -398,7 +358,7 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveMethod} className="space-y-4 text-xs">
+            <div className="space-y-4 text-xs">
               {/* Quick Presets (Only on new add) */}
               {!editingId && (
                 <div>
@@ -525,7 +485,7 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
                         </p>
                         <input
                           type="file"
-                          accept="image/png, image/jpeg, image/webp"
+                          accept="image/*"
                           onChange={e => handleQrFileUpload(e.target.files)}
                           className="hidden"
                         />
@@ -606,8 +566,16 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
                 </label>
               </div>
 
+              {/* Info hint about saving in Settings */}
+              <div className="p-2.5 rounded-xl bg-[#1e1b4b]/50 border border-[#3b2b73] text-[11px] text-[#e0d7f5] flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-[#f472b6] shrink-0" />
+                <span>
+                  Changes will update in your Settings list and be permanently locked in when you click <strong>Save &amp; Lock In All Settings</strong> below.
+                </span>
+              </div>
+
               {/* Modal Actions */}
-              <div className="pt-4 border-t border-[#232f4b] flex items-center justify-end gap-2.5">
+              <div className="pt-3 border-t border-[#232f4b] flex items-center justify-end gap-2.5">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -616,13 +584,15 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
                   Cancel
                 </button>
                 <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#7c5cb7] to-[#9381ff] text-white text-xs font-bold shadow-md hover:opacity-95"
+                  type="button"
+                  onClick={handleSaveMethod}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#7c5cb7] to-[#9381ff] text-white text-xs font-bold shadow-md hover:opacity-95 flex items-center gap-1.5"
                 >
-                  {editingId ? 'Save Changes' : 'Add Payment Method'}
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{editingId ? 'Update in Settings List' : 'Add to Settings List'}</span>
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

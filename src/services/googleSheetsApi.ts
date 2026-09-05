@@ -1193,6 +1193,135 @@ class GoogleSheetsApiService {
     return order;
   }
 
+  public async adminCreateOrder(orderData: Partial<Order>): Promise<Order> {
+    const { orderNumber, confirmationNumber } = this.generateSequentialOrderIds();
+    const now = new Date().toISOString();
+    const fullOrder: Order = {
+      id: orderData.id || `ORD-${Date.now().toString(36).toUpperCase()}`,
+      orderNumber: orderData.orderNumber || orderNumber,
+      confirmationNumber: orderData.confirmationNumber || confirmationNumber,
+      customerId: orderData.customerId || `CUST-${Date.now().toString(36).toUpperCase()}`,
+      customerName: orderData.customerName?.trim() || 'Customer',
+      customerEmail: orderData.customerEmail?.trim().toLowerCase() || 'customer@example.com',
+      customerMobile: orderData.customerMobile?.trim() || '09123456789',
+      customerTwitter: orderData.customerTwitter?.trim() || '',
+      customerFacebook: orderData.customerFacebook?.trim() || '',
+      items: orderData.items && orderData.items.length > 0 ? orderData.items : [],
+      subtotal: orderData.subtotal !== undefined ? orderData.subtotal : (orderData.totalAmount || 0),
+      totalAmount: orderData.totalAmount !== undefined ? orderData.totalAmount : 0,
+      paymentMethod: orderData.paymentMethod || 'GCash',
+      paymentSenderName: orderData.paymentSenderName || orderData.customerName || '',
+      paymentSenderNumber: orderData.paymentSenderNumber || orderData.customerMobile || '',
+      paymentReferenceNumber: orderData.paymentReferenceNumber || `REF-${Date.now().toString(36).toUpperCase()}`,
+      paymentProofUrl: orderData.paymentProofUrl || '',
+      paymentStatus: orderData.paymentStatus || 'Paid',
+      status: orderData.status || 'Paid',
+      pickupLocation: orderData.pickupLocation || this.settings.pickupLocation || 'Cinema Panay Screen 1 Lobby (SM City Iloilo)',
+      pickupDate: orderData.pickupDate || this.settings.pickupDate || 'October 11, 2026',
+      deliveryMethod: 'Pickup Only',
+      notes: orderData.notes || 'Admin created manual order',
+      createdAt: orderData.createdAt || now,
+      updatedAt: now,
+      verifiedBy: orderData.verifiedBy || 'Admin'
+    };
+
+    if (this.getAppsScriptUrl()) {
+      try {
+        await this.executeAppsScript('adminSaveOrder', { order: fullOrder });
+      } catch (err) {
+        console.warn('Google Sheets adminSaveOrder sync:', err);
+      }
+    }
+
+    const existingIdx = this.orders.findIndex(o => o.orderNumber === fullOrder.orderNumber || o.id === fullOrder.id);
+    if (existingIdx >= 0) {
+      this.orders[existingIdx] = fullOrder;
+    } else {
+      this.orders.unshift(fullOrder);
+    }
+
+    // Ensure corresponding payment record exists
+    const payIdx = this.payments.findIndex(p => p.orderNumber === fullOrder.orderNumber);
+    const payRecord: PaymentRecord = {
+      id: payIdx >= 0 ? this.payments[payIdx].id : `PAY-${Date.now().toString(36).toUpperCase()}`,
+      orderNumber: fullOrder.orderNumber,
+      confirmationNumber: fullOrder.confirmationNumber,
+      customerEmail: fullOrder.customerEmail,
+      customerName: fullOrder.customerName,
+      amount: fullOrder.totalAmount,
+      method: fullOrder.paymentMethod,
+      senderName: fullOrder.paymentSenderName || fullOrder.customerName,
+      senderNumber: fullOrder.paymentSenderNumber || fullOrder.customerMobile,
+      referenceNumber: fullOrder.paymentReferenceNumber || 'N/A',
+      proofUrl: fullOrder.paymentProofUrl || '',
+      status: fullOrder.paymentStatus,
+      createdAt: fullOrder.createdAt,
+      notes: fullOrder.notes
+    };
+
+    if (payIdx >= 0) {
+      this.payments[payIdx] = payRecord;
+    } else {
+      this.payments.unshift(payRecord);
+    }
+
+    return fullOrder;
+  }
+
+  public async adminUpdateOrder(updatedOrder: Order): Promise<Order> {
+    const now = new Date().toISOString();
+    const fullOrder: Order = {
+      ...updatedOrder,
+      updatedAt: now
+    };
+
+    if (this.getAppsScriptUrl()) {
+      try {
+        await this.executeAppsScript('adminSaveOrder', { order: fullOrder });
+      } catch (err) {
+        console.warn('Google Sheets adminSaveOrder sync:', err);
+      }
+    }
+
+    const idx = this.orders.findIndex(o => o.orderNumber === fullOrder.orderNumber || o.id === fullOrder.id);
+    if (idx >= 0) {
+      this.orders[idx] = fullOrder;
+    } else {
+      this.orders.unshift(fullOrder);
+    }
+
+    // Update payment record in Payments tab
+    const payRecord = this.payments.find(p => p.orderNumber.toUpperCase() === fullOrder.orderNumber.toUpperCase());
+    if (payRecord) {
+      payRecord.customerName = fullOrder.customerName;
+      payRecord.customerEmail = fullOrder.customerEmail;
+      payRecord.amount = fullOrder.totalAmount;
+      payRecord.method = fullOrder.paymentMethod;
+      payRecord.senderName = fullOrder.paymentSenderName || fullOrder.customerName;
+      payRecord.senderNumber = fullOrder.paymentSenderNumber || fullOrder.customerMobile;
+      payRecord.referenceNumber = fullOrder.paymentReferenceNumber || payRecord.referenceNumber;
+      payRecord.status = fullOrder.paymentStatus;
+      if (fullOrder.notes) payRecord.notes = fullOrder.notes;
+    }
+
+    return fullOrder;
+  }
+
+  public async adminDeleteOrder(orderNumber: string): Promise<boolean> {
+    const clean = orderNumber.trim().toUpperCase();
+    if (this.getAppsScriptUrl()) {
+      try {
+        await this.executeAppsScript('adminDeleteOrder', { orderNumber: clean });
+      } catch (err) {
+        console.warn('Google Sheets adminDeleteOrder sync:', err);
+      }
+    }
+
+    this.orders = this.orders.filter(o => o.orderNumber.toUpperCase() !== clean && o.id !== orderNumber);
+    this.payments = this.payments.filter(p => p.orderNumber.toUpperCase() !== clean);
+    return true;
+  }
+
   // --- Email Logs in APMERCH_DATABASE ---
 
   public async getEmailLogs(): Promise<EmailLog[]> {
