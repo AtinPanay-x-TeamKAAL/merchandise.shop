@@ -91,15 +91,12 @@ export const ETicketModal: React.FC<ETicketModalProps> = ({ order }) => {
               <div>
                 <div className="text-[10px] uppercase font-bold text-[#b19cd9]">Order Number</div>
                 <div className="text-base sm:text-lg font-mono font-black text-white">
-                  {order.orderNumber}
+                  {order.id}
                 </div>
               </div>
-              <div>
-                <div className="text-[10px] uppercase font-bold text-[#f472b6]">Confirmation Code</div>
-                <div className="text-base sm:text-lg font-mono font-black text-[#f472b6]">
-                  {order.confirmationNumber}
-                </div>
-              </div>
+              
+              
+              
             </div>
           </div>
 
@@ -206,7 +203,7 @@ export const ETicketModal: React.FC<ETicketModalProps> = ({ order }) => {
                 ||||| | |||| || ||| |||| | |||||
               </div>
               <div className="font-mono text-[10px] font-bold text-[#b19cd9]">
-                {order.orderNumber}
+                {order.customerId}
               </div>
             </div>
           </div>

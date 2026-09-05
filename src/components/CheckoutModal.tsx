@@ -598,15 +598,10 @@ export const CheckoutModal: React.FC = () => {
                 <div>
                   <div className="text-[10px] font-bold uppercase text-slate-400">Sequential Order ID</div>
                   <div className="text-base sm:text-lg font-mono font-black text-[#b19cd9]">
-                    {createdOrder.orderNumber}
+                    {createdOrder.id}
                   </div>
                 </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase text-slate-400">Confirmation Number</div>
-                  <div className="text-base sm:text-lg font-mono font-black text-[#f472b6]">
-                    {createdOrder.confirmationNumber}
-                  </div>
-                </div>
+                
                 <div className="col-span-2 pt-2 border-t border-[#232f4b] flex items-center justify-between text-xs">
                   <span className="text-slate-400">Current Status:</span>
                   <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">

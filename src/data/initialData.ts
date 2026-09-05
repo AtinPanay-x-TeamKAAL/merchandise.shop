@@ -11,6 +11,8 @@ import {
   PaymentRecord,
   EmailLog
 } from '../types';
+import gcashImg from '../assets/images/Gcash_QR.png';
+import maribankImg from '../assets/images/Maribank_QR.png';
 
 export const INITIAL_PAYMENT_METHODS: PaymentMethodConfig[] = [
   {
@@ -18,41 +20,23 @@ export const INITIAL_PAYMENT_METHODS: PaymentMethodConfig[] = [
     name: 'GCash',
     accountName: 'Mae Joey Balla',
     accountNumber: '09203963249',
-    qrCodeUrl: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=600&q=80',
+    qrCodeUrl: gcashImg,
     instructions: 'Send exact amount via GCash Express Send or scan QR code. Save and upload your transaction receipt.',
     active: true,
     sortOrder: 1
   },
-  {
-    id: 'pm-maya',
-    name: 'Maya',
-    accountName: 'Mae Joey Balla',
-    accountNumber: '09203963249',
-    qrCodeUrl: 'https://images.unsplash.com/photo-1556742049-0a67c5574f73?auto=format&fit=crop&w=600&q=80',
-    instructions: 'Send via Maya / PayMaya to the designated mobile number or scan the QR code. Keep screenshot.',
-    active: true,
-    sortOrder: 2
-  },
+  
   {
     id: 'pm-maribank',
     name: 'MariBank',
     accountName: 'Mae Joey Balla',
-    accountNumber: '09203963249',
-    qrCodeUrl: 'https://images.unsplash.com/photo-1556742044-3c52d6e88c62?auto=format&fit=crop&w=600&q=80',
+    accountNumber: '16268681639',
+    qrCodeUrl: maribankImg,
     instructions: 'Send via SeaBank / MariBank or InstaPay transfer. Save transfer receipt.',
     active: true,
     sortOrder: 3
   },
-  {
-    id: 'pm-bank',
-    name: 'Bank Transfer (BDO / BPI / UnionBank)',
-    accountName: 'Mae Joey Balla',
-    accountNumber: '1092-8374-2910',
-    qrCodeUrl: '',
-    instructions: 'Transfer via InstaPay / PESONet to designated account. Keep reference number & receipt screenshot.',
-    active: true,
-    sortOrder: 4
-  }
+  
 ];
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -61,12 +45,12 @@ export const INITIAL_SETTINGS: AppSettings = {
   paymentMethods: INITIAL_PAYMENT_METHODS,
   gcashNumber: '09203963249',
   gcashAccountName: 'Mae Joey Balla',
-  gcashQrUrl: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=400&q=80',
-  maribankNumber: '09203963249',
+  gcashQrUrl: gcashImg,
+  maribankNumber: '16268681639',
   maribankAccountName: 'Mae Joey Balla',
-  maribankQrUrl: '',
-  preorderOpenDate: '2026-09-01T00:00:00+08:00',
-  preorderCloseDate: '2026-09-20T23:59:59+08:00',
+  maribankQrUrl: maribankImg,
+  preorderOpenDate: '2026-09-01',
+  preorderCloseDate: '2026-09-20',
   preorderWindowText: 'Sept 1 – Sept 20, 2026',
   preorderStatusManual: 'auto',
   preorderOpenDescription: "Lock in your exclusive A'TIN Panay x Team KAAL BlockScreening merchandise before slots close on September 20, 2026 at 11:59 PM PHT.",
@@ -211,7 +195,7 @@ export const INITIAL_ADMINS: AdminUser[] = [
   },
   {
     id: 'ADM-002',
-    email: 'teamkaal.admin@atinpanay.org',
+    email: 'kwentongatinatinlang@gmail.com',
     name: 'Team KAAL Lead',
     role: 'Admin',
     active: true,

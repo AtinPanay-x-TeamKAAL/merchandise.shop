@@ -423,7 +423,7 @@ class GoogleSheetsApiService {
       }
     });
 
-    const nextNumber = maxNumber + 1;
+    const nextNumber = 99999;
     const formattedNumber = String(nextNumber).padStart(5, '0');
     return {
       orderNumber: `APMERCH-ORD-${formattedNumber}`,
@@ -972,11 +972,11 @@ class GoogleSheetsApiService {
     this.logEmail({
       toEmail: createdOrder.customerEmail,
       recipientName: createdOrder.customerName,
-      subject: `Order Submitted - A'TIN Panay BlockScreening [${createdOrder.orderNumber}]`,
+      subject: `Order Submitted - A'TIN Panay BlockScreening [${createdOrder.id}]`,
       templateType: 'Order Submitted',
-      orderNumber: createdOrder.orderNumber,
+      orderNumber: createdOrder.customerId,
       status: 'Sent',
-      previewBody: `Thank you for your order ${createdOrder.orderNumber} (Conf: ${createdOrder.confirmationNumber}). Total: ₱${createdOrder.totalAmount.toLocaleString()}. Pickup is scheduled for October 11, 2026.`
+      previewBody: `Thank you for your order ${createdOrder.id} (Conf: ${createdOrder.customerId}). Total: ₱${createdOrder.totalAmount.toLocaleString()}. Pickup is scheduled for October 11, 2026.`
     });
 
     return createdOrder;

@@ -316,7 +316,7 @@ function generateSequentialIds(ss) {
     const orderNumbers = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
     for (let i = 0; i < orderNumbers.length; i++) {
       const val = String(orderNumbers[i][0] || '');
-      const match = val.match(/APMERCH-ORD-(\\d+)/i);
+      const match = val.match(/APMERCH-ORD-(\d+)/i);
       if (match && match[1]) {
         const num = parseInt(match[1], 10);
         if (num > maxNum) maxNum = num;
@@ -1542,15 +1542,14 @@ function sendTemplateEmail(toEmail, recipientName, subject, templateType, orderN
 
     case 'Order Submitted':
       bodyHtml = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; background: #0b0f19; color: #f3f4f6; border-radius: 12px;">' +
-        '<h2 style="color: #b19cd9;">Order Received! [' + orderNumber + ']</h2>' +
+        '<h2 style="color: #b19cd9;">Order Received! [' + (contextData.id || '') + ']</h2>' +
         '<p>Dear ' + recipientName + ',</p>' +
         '<p>Your pre-order for the <strong>A\\'TIN Panay BlockScreening Exclusive Merchandise</strong> has been recorded in the official database.</p>' +
-        '<p><strong>Order Number:</strong> ' + orderNumber + '<br/>' +
-        '<strong>Confirmation Number:</strong> ' + (contextData.confirmationNumber || '') + '<br/>' +
+       '<strong>Order ID:</strong> ' + (contextData.id || '') + '<br/>' +
         '<strong>Total Amount:</strong> ' + (contextData.totalAmount || '') + ' PHP<br/>' +
         '<strong>Payment Method:</strong> ' + (contextData.paymentMethod || 'GCash') + '<br/>' +
         '<strong>Claiming Date:</strong> ' + (contextData.pickupDate || 'October 11, 2026') + '<br/>' +
-        '<strong>Pickup Location:</strong> ' + (contextData.pickupLocation || 'Cinema Panay (Iloilo City)') + '</p>' +
+        '<strong>Pickup Location:</strong> ' + (contextData.pickupLocation || 'SM City Cinema (Iloilo City)') + '</p>' +
         '<p style="color: #f472b6;">Our organizers will verify your payment details shortly.</p>' +
         '</div>';
       break;

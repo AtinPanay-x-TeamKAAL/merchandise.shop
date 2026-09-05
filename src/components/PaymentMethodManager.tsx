@@ -199,7 +199,7 @@ export const PaymentMethodManager: React.FC<PaymentMethodManagerProps> = ({
         <div>
           <h4 className="text-sm font-bold text-white flex items-center gap-2">
             <CreditCard className="w-4 h-4 text-[#f472b6]" />
-            <span>Dynamic Payment Methods Manager</span>
+            <span> Payment Methods Manager</span>
           </h4>
           <p className="text-xs text-slate-400 mt-0.5">
             Configure dynamic payment gateways (GCash, Maya, MariBank, Banks, or Future Providers). Customers see active methods at checkout.

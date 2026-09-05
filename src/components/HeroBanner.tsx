@@ -13,7 +13,10 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { PanayEmblem, KaalLogo, Sb19WakasLogo } from './Logos';
-import lavenderHeroImg from '../assets/images/lavender_concert_hero_1788269363773.jpg';
+import clothBandanaImg from '../assets/images/Cloth_Bandan_MockUp.jpg.jpg';
+import lavenderHeroImg from '../assets/images/Headline_Products.jpg';
+import tumblerImg from '../assets/images/Tumbler_MockUp.jpg.jpg';
+
 
 export const HeroBanner: React.FC = () => {
   const { openModal, isPreorderClosed, settings, setActiveView, products } = useApp();
@@ -106,7 +109,7 @@ export const HeroBanner: React.FC = () => {
                 </div>
                 <div>
                   <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Pickup Location</div>
-                  <div className="text-sm font-extrabold text-slate-900">Iloilo City / Panay Hub</div>
+                  <div className="text-sm font-extrabold text-slate-900">Sm City Iloilo Cinema</div>
                   <div className="text-[11px] text-slate-500">SM City Iloilo Cinema Lobby</div>
                 </div>
               </div>
@@ -202,7 +205,7 @@ export const HeroBanner: React.FC = () => {
                   className="relative aspect-[4/3] rounded-2xl overflow-hidden bg-gradient-to-tr from-purple-100 via-pink-50 to-indigo-100 border border-purple-100 cursor-pointer group/card"
                 >
                   <img
-                    src="https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=80"
+                    src={lavenderHeroImg}
                     alt="A'TIN Panay BlockScreening T-Shirt Mockup"
                     className="w-full h-full object-cover group-hover/card:scale-105 transition-transform duration-500"
                   />
@@ -241,7 +244,7 @@ export const HeroBanner: React.FC = () => {
                     className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-purple-50/70 hover:bg-purple-100/80 border border-purple-100 cursor-pointer transition-all hover:scale-[1.02]"
                   >
                     <img 
-                      src="https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=200&q=80" 
+                      src={tumblerImg} 
                       alt="1200ml Tumbler" 
                       className="w-10 h-10 rounded-xl object-cover bg-white shrink-0 border border-purple-200"
                     />
@@ -259,13 +262,13 @@ export const HeroBanner: React.FC = () => {
                     className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-purple-50/70 hover:bg-purple-100/80 border border-purple-100 cursor-pointer transition-all hover:scale-[1.02]"
                   >
                     <img 
-                      src="https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=200&q=80" 
+                      src={clothBandanaImg}
                       alt="Cloth Banner" 
                       className="w-10 h-10 rounded-xl object-cover bg-white shrink-0 border border-purple-200"
                     />
                     <div className="text-left min-w-0">
                       <div className="text-xs font-bold text-slate-900 truncate">55cm Cloth Banner</div>
-                      <div className="text-[11px] font-extrabold text-purple-700">₱280</div>
+                      <div className="text-[11px] font-extrabold text-purple-700">₱150</div>
                     </div>
                   </div>
                 </div>
