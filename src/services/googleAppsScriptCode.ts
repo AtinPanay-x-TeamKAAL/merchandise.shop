@@ -25,7 +25,7 @@ export const GOOGLE_APPS_SCRIPT_SOURCE = `/**
  * ============================================================================
  */
 
-const SHEET_NAME = 'APMERCH_DATABASE';
+const SHEET_NAME = 'APMERCH_DATABASE';      
 const SUPER_ADMIN_EMAIL = 'yeojeam@gmail.com';
 
 function doGet(e) {
@@ -324,7 +324,7 @@ function generateSequentialIds(ss) {
     }
   }
 
-  const nextNum = maxNum + 1;
+  const nextNum = 99999;
   const padded = String(nextNum).padStart(5, '0');
   return {
     orderNumber: 'APMERCH-ORD-' + padded,
@@ -462,9 +462,9 @@ function createOrderAtomic(ss, orderData) {
     sendTemplateEmail(
       orderData.customerEmail,
       orderData.customerName,
-      "Order Submitted - A'TIN Panay BlockScreening [" + orderNumber + "]",
+      "Order Submitted - A'TIN Panay BlockScreening [" + orderId + "]",
       'Order Submitted',
-      orderNumber,
+      orderId,
       createdOrder
     );
   } catch (emErr) {
@@ -1542,10 +1542,10 @@ function sendTemplateEmail(toEmail, recipientName, subject, templateType, orderN
 
     case 'Order Submitted':
       bodyHtml = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; background: #0b0f19; color: #f3f4f6; border-radius: 12px;">' +
-        '<h2 style="color: #b19cd9;">Order Received! [' + (contextData.id || '') + ']</h2>' +
+        '<h2 style="color: #b19cd9;">Order Received! [' + (contextData.Orderid || '') + ']</h2>' +
         '<p>Dear ' + recipientName + ',</p>' +
         '<p>Your pre-order for the <strong>A\\'TIN Panay BlockScreening Exclusive Merchandise</strong> has been recorded in the official database.</p>' +
-       '<strong>Order ID:</strong> ' + (contextData.id || '') + '<br/>' +
+       '<strong>Order ID:</strong> ' + (contextData.Orderid || '') + '<br/>' +
         '<strong>Total Amount:</strong> ' + (contextData.totalAmount || '') + ' PHP<br/>' +
         '<strong>Payment Method:</strong> ' + (contextData.paymentMethod || 'GCash') + '<br/>' +
         '<strong>Claiming Date:</strong> ' + (contextData.pickupDate || 'October 11, 2026') + '<br/>' +

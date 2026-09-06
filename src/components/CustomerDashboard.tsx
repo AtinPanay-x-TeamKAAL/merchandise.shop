@@ -198,7 +198,7 @@ export const CustomerDashboard: React.FC = () => {
                       </span>
                     </div>
                     <div className="text-xs text-slate-400">
-                      Placed on {new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      Placed on {new Date(order.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                     </div>
                   </div>
 

@@ -836,7 +836,7 @@ export const AdminDashboard: React.FC = () => {
                     filteredOrders.map(order => (
                       <tr key={order.id} className="hover:bg-[#1e1b4b]/30 transition-colors">
                         <td className="px-4 py-3.5 space-y-0.5">
-                          <div className="font-mono font-black text-white">{order.orderNumber}</div>
+                          <div className="font-mono font-black text-white">{order.id}</div>
                           <div className="font-mono text-[10px] text-[#b19cd9]">Conf: {order.confirmationNumber}</div>
                           <div className="text-[10px] text-slate-500">{order.createdAt.split('T')[0]}</div>
                         </td>

@@ -850,6 +850,7 @@ class GoogleSheetsApiService {
     const finalCode = res.code || verificationCode;
 
     // Send and log verification email
+    
     this.logEmail({
       toEmail: savedCustomer.email,
       recipientName: savedCustomer.fullName,
